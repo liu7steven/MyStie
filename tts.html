@@ -1,0 +1,970 @@
+<!DOCTYPE html>
+<html lang="zh-TW" class="h-full">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Smart English Learning & TTS Lab - 多級別英文朗讀與發音學習系統</title>
+  
+  <!-- Tailwind CSS -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      darkMode: 'class',
+      theme: {
+        extend: {
+          colors: {
+            brand: {
+              50: '#eef2ff',
+              100: '#e0e7ff',
+              500: '#6366f1',
+              600: '#4f46e5',
+              700: '#4338ca',
+            }
+          }
+        }
+      }
+    }
+  </script>
+  
+  <!-- Vue 3 CDN -->
+  <script src="https://unpkg.com/vue@3/dist/vue.global.js"></script>
+  <!-- FontAwesome Icons -->
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+  <!-- Google Fonts -->
+  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=Noto+Sans+TC:wght@400;500;700&display=swap" rel="stylesheet">
+  
+  <style>
+    body {
+      font-family: 'Plus Jakarta Sans', 'Noto Sans TC', sans-serif;
+    }
+    .custom-scrollbar::-webkit-scrollbar {
+      width: 6px;
+    }
+    .custom-scrollbar::-webkit-scrollbar-track {
+      background: transparent;
+    }
+    .custom-scrollbar::-webkit-scrollbar-thumb {
+      background-color: rgba(156, 163, 175, 0.4);
+      border-radius: 20px;
+    }
+    .wave-bar {
+      animation: wave 1.2s ease-in-out infinite alternate;
+    }
+    @keyframes wave {
+      0% { height: 4px; }
+      100% { height: 24px; }
+    }
+  </style>
+</head>
+
+<body class="bg-slate-900 text-slate-100 min-h-full flex flex-col">
+  <div id="app" class="min-h-screen flex flex-col flex-1">
+    
+    <!-- Top Header Bar -->
+    <header class="border-b border-slate-800 bg-slate-900/80 backdrop-blur sticky top-0 z-30">
+      <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between">
+        <div class="flex items-center space-x-3">
+          <div class="w-10 h-10 rounded-xl bg-gradient-to-tr from-indigo-600 to-purple-500 flex items-center justify-center shadow-lg shadow-indigo-500/20">
+            <i class="fa-solid font-bold text-white text-xl fa-language"></i>
+          </div>
+          <div>
+            <h1 class="font-bold text-lg text-white leading-tight">English AI Master</h1>
+            <p class="text-xs text-slate-400">多級別英文學習與 Gemini TTS 發音指南</p>
+          </div>
+        </div>
+
+        <!-- Action Controls -->
+        <div class="flex items-center space-x-3">
+          <!-- API Key Status Indicator -->
+          <button @click="showKeyModal = true" 
+                  class="flex items-center space-x-2 px-3 py-1.5 rounded-lg text-xs font-medium border transition-all"
+                  :class="userApiKey ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-400 hover:bg-emerald-500/20' : 'bg-amber-500/10 border-amber-500/30 text-amber-400 hover:bg-amber-500/20'">
+            <i class="fa-solid text-xs" :class="userApiKey ? 'fa-key-skeleton text-emerald-400' : 'fa-triangle-exclamation text-amber-400'"></i>
+            <span>{{ userApiKey ? 'API Key 已設定' : '輸入自訂 API Key' }}</span>
+          </button>
+
+          <!-- Favorites / History Modal Toggle -->
+          <button @click="showHistoryModal = true" class="p-2 text-slate-400 hover:text-white rounded-lg hover:bg-slate-800 transition-colors" title="收藏與紀錄">
+            <i class="fa-solid fa-bookmark"></i>
+          </button>
+        </div>
+      </div>
+    </header>
+
+    <!-- Main Container -->
+    <main class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6 flex-1 w-full grid grid-cols-1 lg:grid-cols-12 gap-6">
+      
+      <!-- Left Sidebar: Level & Preference Controls -->
+      <div class="lg:col-span-4 space-y-6">
+        
+        <!-- Level Picker Card -->
+        <div class="bg-slate-800/80 border border-slate-700/60 rounded-2xl p-5 shadow-xl space-y-5">
+          <div class="flex items-center justify-between border-b border-slate-700/60 pb-3">
+            <h2 class="font-bold text-white flex items-center gap-2">
+              <i class="fa-solid fa-graduation-cap text-indigo-400"></i>
+              學習對象與難度等級
+            </h2>
+            <span class="text-xs text-slate-400">CEFR / TOEIC 標籤</span>
+          </div>
+
+          <!-- Grade Level Selector -->
+          <div class="space-y-2">
+            <label class="text-xs font-semibold text-slate-400 tracking-wider uppercase">學制等級 (Grade Level)</label>
+            <div class="grid grid-cols-2 gap-2">
+              <button v-for="lvl in schoolLevels" 
+                      :key="lvl.id"
+                      @click="selectedLevel = lvl.id"
+                      class="flex flex-col p-3 rounded-xl border text-left transition-all relative overflow-hidden"
+                      :class="selectedLevel === lvl.id ? 'bg-indigo-600/20 border-indigo-500 text-white shadow-md shadow-indigo-500/10' : 'bg-slate-900/50 border-slate-700/50 text-slate-300 hover:bg-slate-800'">
+                <div class="flex items-center justify-between w-full mb-1">
+                  <span class="text-sm font-bold">{{ lvl.icon }} {{ lvl.name }}</span>
+                  <span class="text-[10px] px-1.5 py-0.5 rounded font-mono" :class="lvl.badgeBg">{{ lvl.cefr }}</span>
+                </div>
+                <span class="text-[11px] text-slate-400">{{ lvl.desc }}</span>
+              </button>
+            </div>
+          </div>
+
+          <!-- TOEIC Target Level -->
+          <div class="space-y-2">
+            <label class="text-xs font-semibold text-slate-400 tracking-wider uppercase">多益對應目標 (TOEIC Target)</label>
+            <div class="grid grid-cols-3 gap-2">
+              <button v-for="t in toeicLevels" 
+                      :key="t.score"
+                      @click="selectedToeic = t.score"
+                      class="px-2.5 py-2 rounded-xl border text-center transition-all text-xs font-medium"
+                      :class="selectedToeic === t.score ? 'bg-purple-600/20 border-purple-500 text-purple-300 font-bold' : 'bg-slate-900/40 border-slate-700/40 text-slate-400 hover:bg-slate-800'">
+                <div class="font-bold">{{ t.label }}</div>
+                <div class="text-[10px] opacity-75">{{ t.desc }}</div>
+              </button>
+            </div>
+          </div>
+
+          <!-- Topic / Scenario Picker -->
+          <div class="space-y-2">
+            <label class="text-xs font-semibold text-slate-400 tracking-wider uppercase">實用主題情境 (Category)</label>
+            <select v-model="selectedCategory" class="w-full bg-slate-900/90 border border-slate-700 text-slate-200 text-sm rounded-xl px-3 py-2.5 focus:ring-2 focus:ring-indigo-500 focus:outline-none">
+              <option v-for="cat in categories" :key="cat.id" :value="cat.id">{{ cat.name }} ({{ cat.desc }})</option>
+            </select>
+          </div>
+
+          <!-- TTS Engine & Voice Config -->
+          <div class="space-y-3 pt-2 border-t border-slate-700/60">
+            <div class="flex items-center justify-between">
+              <label class="text-xs font-semibold text-slate-400 tracking-wider uppercase flex items-center gap-1.5">
+                <i class="fa-solid fa-microphone-lines text-indigo-400"></i>
+                TTS 發音引擎與語音
+              </label>
+            </div>
+            
+            <div class="grid grid-cols-2 gap-2">
+              <button @click="ttsMode = 'gemini'" 
+                      class="px-3 py-2 rounded-lg border text-xs font-medium flex items-center justify-center gap-1.5"
+                      :class="ttsMode === 'gemini' ? 'bg-indigo-600 border-indigo-500 text-white' : 'bg-slate-900 border-slate-700 text-slate-400'">
+                <i class="fa-solid fa-wand-magic-sparkles text-[10px]"></i> Gemini AI 語音
+              </button>
+              <button @click="ttsMode = 'web'" 
+                      class="px-3 py-2 rounded-lg border text-xs font-medium flex items-center justify-center gap-1.5"
+                      :class="ttsMode === 'web' ? 'bg-slate-700 border-slate-600 text-white' : 'bg-slate-900 border-slate-700 text-slate-400'">
+                <i class="fa-solid fa-globe text-[10px]"></i> 瀏覽器內建
+              </button>
+            </div>
+
+            <!-- Gemini Voice Picker -->
+            <div v-if="ttsMode === 'gemini'" class="grid grid-cols-2 gap-2 pt-1">
+              <select v-model="selectedVoice" class="col-span-2 bg-slate-900 border border-slate-700 text-xs rounded-lg px-2.5 py-2 text-slate-300">
+                <option value="Kore">🎙️ Kore (Firm / 穩重女聲)</option>
+                <option value="Puck">🎙️ Puck (Upbeat / 活潑男聲)</option>
+                <option value="Zephyr">🎙️ Zephyr (Bright / 明亮中性)</option>
+                <option value="Fenrir">🎙️ Fenrir (Excitable / 熱情男聲)</option>
+                <option value="Aoede">🎙️ Aoede (Breezy / 輕快女聲)</option>
+                <option value="Charon">🎙️ Charon (Informative / 敘事男聲)</option>
+              </select>
+            </div>
+          </div>
+
+          <!-- Generate Button -->
+          <button @click="generateCard" 
+                  :disabled="loading"
+                  class="w-full py-3.5 px-4 rounded-xl font-bold text-white bg-gradient-to-r from-indigo-600 via-indigo-500 to-purple-600 hover:from-indigo-500 hover:to-purple-500 active:scale-[0.98] shadow-lg shadow-indigo-500/25 flex items-center justify-center space-x-2 transition-all disabled:opacity-50">
+            <i v-if="loading" class="fa-solid fa-circle-notch fa-spin"></i>
+            <i v-else class="fa-solid fa-sparkles"></i>
+            <span>{{ loading ? 'AI 正在分析生成中...' : '生成該等級每日學習卡' }}</span>
+          </button>
+
+          <!-- Quick Demo Buttons -->
+          <div class="flex items-center justify-between text-xs text-slate-400 pt-1">
+            <span>沒有 API Key？使用預載範例：</span>
+            <button @click="loadPreset" class="text-indigo-400 hover:underline font-medium">🎲 載入預設卡片</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Right Main Card & Detailed Learning Content -->
+      <div class="lg:col-span-8 space-y-6">
+        
+        <!-- Loading Skeleton -->
+        <div v-if="loading" class="bg-slate-800/80 border border-slate-700/60 rounded-2xl p-8 shadow-xl space-y-6 animate-pulse">
+          <div class="h-6 bg-slate-700/60 rounded w-1/4"></div>
+          <div class="h-12 bg-slate-700/60 rounded w-3/4"></div>
+          <div class="h-6 bg-slate-700/60 rounded w-1/2"></div>
+          <div class="h-24 bg-slate-700/40 rounded"></div>
+        </div>
+
+        <!-- Card View -->
+        <div v-else-if="currentCard" class="bg-slate-800/90 border border-slate-700/70 rounded-2xl p-6 sm:p-8 shadow-2xl relative overflow-hidden">
+          
+          <!-- Background Glow -->
+          <div class="absolute -top-24 -right-24 w-60 h-60 bg-indigo-500/10 rounded-full blur-3xl pointer-events-none"></div>
+          
+          <!-- Card Header Badges -->
+          <div class="flex flex-wrap items-center justify-between gap-2 border-b border-slate-700/60 pb-4 mb-6">
+            <div class="flex items-center space-x-2">
+              <span class="px-2.5 py-1 rounded-lg text-xs font-bold bg-indigo-500/20 text-indigo-300 border border-indigo-500/30">
+                {{ getLevelLabel(currentCard.level) }}
+              </span>
+              <span class="px-2.5 py-1 rounded-lg text-xs font-bold bg-purple-500/20 text-purple-300 border border-purple-500/30">
+                多益約 {{ currentCard.toeicTarget }} 分
+              </span>
+              <span class="px-2.5 py-1 rounded-lg text-xs font-medium bg-slate-700 text-slate-300">
+                CEFR {{ currentCard.cefr }}
+              </span>
+            </div>
+            
+            <div class="flex items-center space-x-2">
+              <button @click="toggleFavorite" 
+                      class="px-3 py-1.5 rounded-lg text-xs font-medium border transition-colors flex items-center space-x-1"
+                      :class="isFavorite ? 'bg-amber-500/20 border-amber-500/40 text-amber-300' : 'bg-slate-700/50 border-slate-600 text-slate-400 hover:text-white'">
+                <i class="fa-solid fa-star" :class="isFavorite ? 'text-amber-400' : ''"></i>
+                <span>{{ isFavorite ? '已收藏' : '收藏此句' }}</span>
+              </button>
+            </div>
+          </div>
+
+          <!-- Main Sentence Display -->
+          <div class="space-y-4 mb-8">
+            <h2 class="text-2xl sm:text-3xl font-extrabold text-white leading-relaxed tracking-wide">
+              "{{ currentCard.englishSentence }}"
+            </h2>
+            
+            <!-- IPA & Translation -->
+            <div class="space-y-1">
+              <div v-if="currentCard.fullIpa" class="text-indigo-300 font-mono text-sm flex items-center gap-2">
+                <i class="fa-solid fa-volume-high text-xs opacity-75"></i>
+                <span>[{{ currentCard.fullIpa }}]</span>
+              </div>
+              <p class="text-lg text-slate-300 font-medium leading-normal">
+                {{ currentCard.chineseTranslation }}
+              </p>
+              <p v-if="currentCard.authorOrContext" class="text-xs text-slate-400 italic">
+                — {{ currentCard.authorOrContext }}
+              </p>
+            </div>
+          </div>
+
+          <!-- Integrated Interactive TTS Player -->
+          <div class="bg-slate-900/90 border border-indigo-500/30 rounded-2xl p-4 sm:p-5 mb-8 shadow-inner">
+            <div class="flex flex-col sm:flex-row items-center justify-between gap-4">
+              
+              <!-- Play / Audio Controls -->
+              <div class="flex items-center space-x-3 w-full sm:w-auto justify-between sm:justify-start">
+                <button @click="playTTS" 
+                        :disabled="isPlayingAudio"
+                        class="w-14 h-14 rounded-full bg-indigo-600 hover:bg-indigo-500 active:scale-95 text-white flex items-center justify-center shadow-lg shadow-indigo-600/30 transition-all text-xl">
+                  <i v-if="isPlayingAudio" class="fa-solid fa-spinner fa-spin"></i>
+                  <i v-else-if="audioStatus === 'playing'" class="fa-solid fa-pause"></i>
+                  <i v-else class="fa-solid fa-play ml-1"></i>
+                </button>
+
+                <div class="flex flex-col">
+                  <span class="text-sm font-bold text-white flex items-center gap-1.5">
+                    <i class="fa-solid fa-headphones text-indigo-400"></i>
+                    {{ ttsMode === 'gemini' ? `Gemini AI (${selectedVoice})` : '系統內建 TTS' }}
+                  </span>
+                  <span class="text-xs text-slate-400">
+                    {{ audioStatusText }}
+                  </span>
+                </div>
+              </div>
+
+              <!-- Audio Waves Animation -->
+              <div v-if="audioStatus === 'playing'" class="flex items-center space-x-1 h-6">
+                <div class="w-1 bg-indigo-400 rounded-full wave-bar" style="animation-delay: 0.1s"></div>
+                <div class="w-1 bg-purple-400 rounded-full wave-bar" style="animation-delay: 0.3s"></div>
+                <div class="w-1 bg-indigo-500 rounded-full wave-bar" style="animation-delay: 0.2s"></div>
+                <div class="w-1 bg-pink-400 rounded-full wave-bar" style="animation-delay: 0.4s"></div>
+                <div class="w-1 bg-indigo-300 rounded-full wave-bar" style="animation-delay: 0.25s"></div>
+              </div>
+
+              <!-- Speed Preset Toggles -->
+              <div class="flex items-center space-x-1.5 bg-slate-800 p-1.5 rounded-xl border border-slate-700/80">
+                <button v-for="rate in [0.75, 1.0, 1.25]" 
+                        :key="rate"
+                        @click="setPlaybackRate(rate)"
+                        class="px-2.5 py-1 rounded-lg text-xs font-bold transition-all"
+                        :class="playbackRate === rate ? 'bg-indigo-600 text-white shadow' : 'text-slate-400 hover:text-slate-200'">
+                  {{ rate }}x {{ rate === 0.75 ? '慢速' : rate === 1.25 ? '快速' : '標準' }}
+                </button>
+              </div>
+            </div>
+          </div>
+
+          <!-- Learning Tabs -->
+          <div class="space-y-4">
+            <div class="flex border-b border-slate-700 overflow-x-auto custom-scrollbar">
+              <button @click="activeTab = 'tts'" 
+                      class="px-4 py-2.5 text-sm font-bold border-b-2 whitespace-nowrap transition-colors flex items-center gap-2"
+                      :class="activeTab === 'tts' ? 'border-indigo-500 text-indigo-400' : 'border-transparent text-slate-400 hover:text-slate-200'">
+                <i class="fa-solid fa-volume-high"></i> 1. TTS 發音與連音拆解
+              </button>
+              <button @click="activeTab = 'vocab'" 
+                      class="px-4 py-2.5 text-sm font-bold border-b-2 whitespace-nowrap transition-colors flex items-center gap-2"
+                      :class="activeTab === 'vocab' ? 'border-indigo-500 text-indigo-400' : 'border-transparent text-slate-400 hover:text-slate-200'">
+                <i class="fa-solid fa-book-open"></i> 2. 重點單字與片語
+              </button>
+              <button @click="activeTab = 'grammar'" 
+                      class="px-4 py-2.5 text-sm font-bold border-b-2 whitespace-nowrap transition-colors flex items-center gap-2"
+                      :class="activeTab === 'grammar' ? 'border-indigo-500 text-indigo-400' : 'border-transparent text-slate-400 hover:text-slate-200'">
+                <i class="fa-solid fa-layer-group"></i> 3. 句型文法與造句挑戰
+              </button>
+            </div>
+
+            <!-- Tab 1: TTS Reading & Linking Guide -->
+            <div v-if="activeTab === 'tts'" class="space-y-4 pt-2">
+              
+              <!-- Chunked Pauses Script -->
+              <div class="bg-slate-900/60 rounded-xl p-4 border border-slate-700/50 space-y-2">
+                <h4 class="text-xs font-bold text-slate-400 uppercase tracking-wider flex items-center gap-1.5">
+                  <i class="fa-solid fa-stopwatch text-indigo-400"></i>
+                  節奏與停頓點標記 (Script with Pauses)
+                </h4>
+                <p class="text-base text-slate-200 font-mono bg-slate-950/50 p-3 rounded-lg border border-slate-800">
+                  {{ currentCard.ttsScript.chunkedSentence }}
+                </p>
+                <p class="text-xs text-slate-400">點說明：<span class="text-indigo-400 font-bold">·</span> 表示微小停頓呼吸點，大寫字代表句中重音強調點。</p>
+              </div>
+
+              <!-- Linking Rules Table -->
+              <div class="bg-slate-900/60 rounded-xl p-4 border border-slate-700/50 space-y-3">
+                <h4 class="text-xs font-bold text-slate-400 uppercase tracking-wider flex items-center gap-1.5">
+                  <i class="fa-solid fa-link text-indigo-400"></i>
+                  關鍵連音與發音規則 (Linking & Phonetic Rules)
+                </h4>
+                <div class="overflow-x-auto">
+                  <table class="w-full text-xs text-left text-slate-300">
+                    <thead class="text-slate-400 uppercase bg-slate-800/60">
+                      <tr>
+                        <th class="px-3 py-2 rounded-l">文字片段</th>
+                        <th class="px-3 py-2">音標 (IPA)</th>
+                        <th class="px-3 py-2 rounded-r">發音技巧與連音說明</th>
+                      </tr>
+                    </thead>
+                    <tbody class="divide-y divide-slate-800">
+                      <tr v-for="(rule, idx) in currentCard.ttsScript.linkingRules" :key="idx" class="hover:bg-slate-800/30">
+                        <td class="px-3 py-2.5 font-bold text-white">{{ rule.phrase }}</td>
+                        <td class="px-3 py-2.5 font-mono text-indigo-300">{{ rule.ipa }}</td>
+                        <td class="px-3 py-2.5 text-slate-300">{{ rule.rule }}</td>
+                      </tr>
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+
+              <!-- Intonation Curve -->
+              <div class="bg-slate-900/60 rounded-xl p-4 border border-slate-700/50 space-y-1">
+                <h4 class="text-xs font-bold text-slate-400 uppercase tracking-wider flex items-center gap-1.5">
+                  <i class="fa-solid fa-chart-line text-indigo-400"></i>
+                  語調起伏提示 (Intonation Curve)
+                </h4>
+                <p class="text-xs text-slate-300 leading-relaxed">{{ currentCard.ttsScript.intonationTips }}</p>
+              </div>
+            </div>
+
+            <!-- Tab 2: Vocab Breakdown -->
+            <div v-if="activeTab === 'vocab'" class="space-y-3 pt-2">
+              <div v-for="(word, idx) in currentCard.vocabulary" 
+                   :key="idx" 
+                   class="bg-slate-900/60 rounded-xl p-4 border border-slate-700/50 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                <div class="space-y-1">
+                  <div class="flex items-center space-x-2">
+                    <span class="font-bold text-base text-white">{{ word.word }}</span>
+                    <span class="text-xs px-2 py-0.5 rounded bg-slate-800 text-indigo-300 font-mono">{{ word.pos }}</span>
+                    <span class="text-xs text-indigo-400 font-mono">/{{ word.ipa }}/</span>
+                  </div>
+                  <p class="text-sm text-slate-300">{{ word.meaning }}</p>
+                  <p class="text-xs text-slate-400 italic">例句: {{ word.example }}</p>
+                </div>
+                <button @click="speakSingleWord(word.word)" class="self-start sm:self-center p-2 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white transition-colors text-xs flex items-center gap-1">
+                  <i class="fa-solid fa-volume-low"></i>
+                  <span>讀單字</span>
+                </button>
+              </div>
+            </div>
+
+            <!-- Tab 3: Grammar & Substitution Challenge -->
+            <div v-if="activeTab === 'grammar'" class="space-y-4 pt-2">
+              
+              <div class="bg-slate-900/60 rounded-xl p-4 border border-slate-700/50 space-y-2">
+                <h4 class="text-xs font-bold text-slate-400 uppercase tracking-wider flex items-center gap-1.5">
+                  <i class="fa-solid fa-sitemap text-indigo-400"></i>
+                  句型文法解析
+                </h4>
+                <ul class="list-disc list-inside space-y-1 text-sm text-slate-300">
+                  <li v-for="(g, idx) in currentCard.grammarNotes" :key="idx">{{ g }}</li>
+                </ul>
+              </div>
+
+              <!-- Sentence Builder Practice -->
+              <div class="bg-slate-900/60 rounded-xl p-4 border border-slate-700/50 space-y-3">
+                <h4 class="text-xs font-bold text-indigo-300 uppercase tracking-wider flex items-center gap-1.5">
+                  <i class="fa-solid fa-pen-ruler text-indigo-400"></i>
+                  每日造句替換挑戰 (Sentence Substitution)
+                </h4>
+                <p class="text-xs text-slate-300">{{ currentCard.shadowingChallenge.instruction }}</p>
+                
+                <div class="p-3 bg-slate-950/60 rounded-lg border border-slate-800 font-mono text-sm text-indigo-200">
+                  {{ currentCard.shadowingChallenge.template }}
+                </div>
+
+                <div class="space-y-2">
+                  <p class="text-xs font-bold text-slate-400">示範練習範例：</p>
+                  <div v-for="(ex, idx) in currentCard.shadowingChallenge.examples" :key="idx" class="text-xs text-slate-300 bg-slate-800/40 p-2.5 rounded-lg border border-slate-700/40">
+                    <div>💬 {{ ex.en }}</div>
+                    <div class="text-slate-400 mt-0.5">👉 {{ ex.zh }}</div>
+                  </div>
+                </div>
+              </div>
+
+            </div>
+
+          </div>
+
+        </div>
+
+      </div>
+
+    </main>
+
+    <!-- API Key Settings Modal -->
+    <div v-if="showKeyModal" class="fixed inset-0 bg-slate-950/80 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+      <div class="bg-slate-900 border border-slate-700 rounded-2xl max-w-md w-full p-6 shadow-2xl space-y-5">
+        <div class="flex items-center justify-between border-b border-slate-800 pb-3">
+          <h3 class="font-bold text-white text-lg flex items-center gap-2">
+            <i class="fa-solid fa-key text-indigo-400"></i>
+            設定自訂 Gemini API Key
+          </h3>
+          <button @click="showKeyModal = false" class="text-slate-400 hover:text-white">
+            <i class="fa-solid fa-xmark"></i>
+          </button>
+        </div>
+
+        <p class="text-xs text-slate-300 leading-relaxed">
+          輸入你的 Google Gemini API Key 即可呼叫最優質的 <code class="text-indigo-300 bg-slate-800 px-1 py-0.5 rounded">gemini-3-flash-preview</code> 與高音質 <code class="text-purple-300 bg-slate-800 px-1 py-0.5 rounded">gemini-2.5-flash-preview-tts</code> 生成自訂分級教材。Key 將僅存在你本機瀏覽器。
+        </p>
+
+        <div class="space-y-2">
+          <label class="text-xs font-semibold text-slate-400 uppercase">Gemini API Key</label>
+          <div class="relative">
+            <input :type="showKeyText ? 'text' : 'password'" 
+                   v-model="tempApiKey" 
+                   placeholder="AIzaSy..."
+                   class="w-full bg-slate-950 border border-slate-700 rounded-xl px-3.5 py-2.5 text-sm text-white focus:ring-2 focus:ring-indigo-500 focus:outline-none pr-10">
+            <button @click="showKeyText = !showKeyText" class="absolute right-3 top-3 text-slate-400 hover:text-white text-xs">
+              <i class="fa-solid" :class="showKeyText ? 'fa-eye-slash' : 'fa-eye'"></i>
+            </button>
+          </div>
+        </div>
+
+        <div class="flex items-center justify-between pt-2">
+          <button @click="clearApiKey" class="text-xs text-rose-400 hover:underline">清除保存的 Key</button>
+          <div class="flex space-x-2">
+            <button @click="showKeyModal = false" class="px-4 py-2 rounded-xl text-xs font-bold text-slate-300 hover:bg-slate-800">取消</button>
+            <button @click="saveApiKey" class="px-4 py-2 rounded-xl text-xs font-bold text-white bg-indigo-600 hover:bg-indigo-500 shadow">儲存 API Key</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- History / Saved Cards Modal -->
+    <div v-if="showHistoryModal" class="fixed inset-0 bg-slate-950/80 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+      <div class="bg-slate-900 border border-slate-700 rounded-2xl max-w-2xl w-full p-6 shadow-2xl space-y-4 max-h-[85vh] flex flex-col">
+        <div class="flex items-center justify-between border-b border-slate-800 pb-3">
+          <h3 class="font-bold text-white text-lg flex items-center gap-2">
+            <i class="fa-solid fa-bookmark text-amber-400"></i>
+            我的收藏句卡 ({{ favorites.length }})
+          </h3>
+          <button @click="showHistoryModal = false" class="text-slate-400 hover:text-white">
+            <i class="fa-solid fa-xmark"></i>
+          </button>
+        </div>
+
+        <div class="overflow-y-auto custom-scrollbar flex-1 space-y-3 pr-1">
+          <div v-if="favorites.length === 0" class="text-center py-10 text-slate-500 text-sm">
+            目前還沒有收藏任何句卡點擊句卡右上角的星號即可收藏。
+          </div>
+          <div v-for="(card, idx) in favorites" 
+               :key="idx" 
+               @click="selectFavoriteCard(card)"
+               class="bg-slate-800/60 hover:bg-slate-800 border border-slate-700/60 rounded-xl p-4 cursor-pointer transition-all space-y-2">
+            <div class="flex items-center justify-between text-xs">
+              <span class="px-2 py-0.5 rounded bg-indigo-500/20 text-indigo-300 font-bold">{{ getLevelLabel(card.level) }}</span>
+              <span class="text-slate-400">{{ card.date || '已收藏' }}</span>
+            </div>
+            <p class="text-sm font-bold text-white">"{{ card.englishSentence }}"</p>
+            <p class="text-xs text-slate-300">{{ card.chineseTranslation }}</p>
+          </div>
+        </div>
+      </div>
+    </div>
+
+  </div>
+
+  <script>
+    const { createApp, ref, onMounted, computed, watch } = Vue;
+
+    createApp({
+      setup() {
+        // State variables
+        const userApiKey = ref(localStorage.getItem('gemini_user_api_key') || '');
+        const tempApiKey = ref(userApiKey.value);
+        const showKeyModal = ref(false);
+        const showKeyText = ref(false);
+        const showHistoryModal = ref(false);
+
+        // Grade levels definition
+        const schoolLevels = [
+          { id: 'elementary', name: '國小級', cefr: 'A1', icon: '🎒', desc: '基礎單字、簡單日常短句 (~300字)', badgeBg: 'bg-emerald-500/20 text-emerald-300' },
+          { id: 'junior', name: '國中級', cefr: 'A2', icon: '🏫', desc: '會話文法、基本說明文 (~2000字)', badgeBg: 'bg-blue-500/20 text-blue-300' },
+          { id: 'senior', name: '高中級', cefr: 'B1-B2', icon: '🎓', desc: '閱讀解析、複合時態 (~7000字)', badgeBg: 'bg-purple-500/20 text-purple-300' },
+          { id: 'college', name: '大學/通用', cefr: 'B2-C1', icon: '🏛️', desc: '深度思辨、學術與新聞英文', badgeBg: 'bg-amber-500/20 text-amber-300' }
+        ];
+
+        // TOEIC Levels
+        const toeicLevels = [
+          { score: '550', label: '多益 550+', desc: '綠色證書 / 基礎商務' },
+          { score: '750', label: '多益 750+', desc: '藍色證書 / 職涯進階' },
+          { score: '900', label: '多益 900+', desc: '金色證書 / 精英商務' }
+        ];
+
+        // Categories
+        const categories = [
+          { id: 'daily_quote', name: '💡 每日名言金句', desc: '勵志、名言與哲理思考' },
+          { id: 'business', name: '💼 職場商務溝通', desc: '會議、郵件與簡報對話' },
+          { id: 'daily_life', name: '☕ 社交與日常生活', desc: '聊天、閒聊與購物興趣' },
+          { id: 'travel', name: '✈️ 旅遊與異國文化', desc: '機場、飯店與餐廳應答' },
+          { id: 'academic', name: '🔬 科技與學術思辨', desc: '趨勢、創新與議題論述' }
+        ];
+
+        const selectedLevel = ref('junior');
+        const selectedToeic = ref('550');
+        const selectedCategory = ref('daily_quote');
+        const ttsMode = ref('gemini'); // 'gemini' or 'web'
+        const selectedVoice = ref('Kore');
+        const playbackRate = ref(1.0);
+
+        const loading = ref(false);
+        const isPlayingAudio = ref(false);
+        const audioStatus = ref('stopped'); // 'stopped', 'loading', 'playing'
+        const activeTab = ref('tts');
+
+        const currentCard = ref(null);
+        const favorites = ref(JSON.parse(localStorage.getItem('english_favorites') || '[]'));
+
+        // Presets data when no API key is set
+        const presetCards = {
+          junior: {
+            level: 'junior',
+            toeicTarget: '550',
+            cefr: 'A2',
+            englishSentence: 'The secret of getting ahead is getting started.',
+            chineseTranslation: '領先的祕訣，在於開始行動。',
+            authorOrContext: 'Mark Twain (馬克·吐溫)',
+            fullIpa: 'ðə ˈsiːkrət əv ˈɡetɪŋ əˈhed ɪz ˈɡetɪŋ ˈstɑːrtɪd',
+            vocabulary: [
+              { word: 'get ahead', pos: 'phr.', ipa: 'ɡet əˈhed', meaning: '取得成功、領先', example: 'Hard work helps you get ahead.' },
+              { word: 'get started', pos: 'phr.', ipa: 'ɡet ˈstɑːrtɪd', meaning: '著手進行、開始', example: 'Let us get started on the work.' },
+              { word: 'secret', pos: 'n.', ipa: 'ˈsiːkrət', meaning: '秘訣、秘密', example: 'What is the secret to success?' }
+            ],
+            grammarNotes: [
+              '主詞為 The secret of getting ahead (領先的秘訣)，介系詞 of 後接動名詞 getting。',
+              '補語為 getting started (開始行動)。'
+            ],
+            ttsScript: {
+              chunkedSentence: 'The SEcret of getting aHEAD · is getting STARted.',
+              linkingRules: [
+                { phrase: 'secret of', ipa: 'ˈsiːkrət əv', rule: 't + o 連音：secret 的尾音 /t/ 弱化並與 of 連讀。' },
+                { phrase: 'getting ahead', ipa: 'ˈɡetɪŋ əˈhed', rule: '美式閃音 (Flap T)：getting 中的 tt 發音類似 ged-ding。' }
+              ],
+              intonationTips: '前半句「getting ahead↗️」語調微升形成懸念，後半句「started.↘️」下降表現確定感。'
+            },
+            shadowingChallenge: {
+              instruction: '請使用句型「The secret of [目標] is [行動]」進行替換造句練習。',
+              template: 'The secret of [V-ing Target] is [V-ing Action].',
+              examples: [
+                { en: 'The secret of mastering English is practicing every day.', zh: '學好英文的祕訣在於每天練習。' },
+                { en: 'The secret of staying healthy is getting enough sleep.', zh: '保持健康的祕訣在於擁有充足睡眠。' }
+              ]
+            }
+          },
+          senior: {
+            level: 'senior',
+            toeicTarget: '750',
+            cefr: 'B2',
+            englishSentence: 'Opportunities don\'t happen, you create them.',
+            chineseTranslation: '機會不會憑空降臨，而是由你親手創造。',
+            authorOrContext: 'Chris Grosser',
+            fullIpa: 'ˌɑːpərˈtuːnətiz doʊnt ˈhæpən, juː kriˈeɪt ðəm',
+            vocabulary: [
+              { word: 'opportunity', pos: 'n.', ipa: 'ˌɑːpərˈtuːnəti', meaning: '機會、時機', example: 'Grab every opportunity you get.' },
+              { word: 'create', pos: 'v.', ipa: 'kriˈeɪt', meaning: '創造、建立', example: 'She created a new design.' }
+            ],
+            grammarNotes: [
+              '由兩個獨立子句組成的對比句型：前句否定、後句肯定。',
+              '代名詞 them 指代前句的複數名詞 Opportunities。'
+            ],
+            ttsScript: {
+              chunkedSentence: 'OPportunities · don\'t HAPpen, · you creATE them.',
+              linkingRules: [
+                { phrase: 'create them', ipa: 'kriˈeɪt ðəm', rule: 'create 的 /t/ 音微弱停頓，順暢接至 them 的 /ð/。' }
+              ],
+              intonationTips: 'don\'t happen 處可微升 pause，you create them 強調 create 傳遞自主權。'
+            },
+            shadowingChallenge: {
+              instruction: '請使用「[A] don\'t happen, you [Action] them」造句。',
+              template: '[Plural Noun] don\'t happen, you [Verb] them.',
+              examples: [
+                { en: 'Great results don\'t happen, you work for them.', zh: '卓越的成果不會憑空產生，是你努力爭取來的。' }
+              ]
+            }
+          }
+        };
+
+        const saveApiKey = () => {
+          userApiKey.value = tempApiKey.value.trim();
+          localStorage.setItem('gemini_user_api_key', userApiKey.value);
+          showKeyModal.value = false;
+        };
+
+        const clearApiKey = () => {
+          userApiKey.value = '';
+          tempApiKey.value = '';
+          localStorage.removeItem('gemini_user_api_key');
+          showKeyModal.value = false;
+        };
+
+        const getLevelLabel = (lvlId) => {
+          const item = schoolLevels.find(l => l.id === lvlId);
+          return item ? item.name : '一般等級';
+        };
+
+        const isFavorite = computed(() => {
+          if (!currentCard.value) return false;
+          return favorites.value.some(f => f.englishSentence === currentCard.value.englishSentence);
+        });
+
+        const toggleFavorite = () => {
+          if (!currentCard.value) return;
+          if (isFavorite.value) {
+            favorites.value = favorites.value.filter(f => f.englishSentence !== currentCard.value.englishSentence);
+          } else {
+            favorites.value.push({ ...currentCard.value, date: new Date().toLocaleDateString() });
+          }
+          localStorage.setItem('english_favorites', JSON.stringify(favorites.value));
+        };
+
+        const selectFavoriteCard = (card) => {
+          currentCard.value = card;
+          showHistoryModal.value = false;
+        };
+
+        // Generate Daily Card using Gemini 3 Flash
+        const generateCard = async () => {
+          const keyToUse = userApiKey.value.trim();
+          
+          if (!keyToUse) {
+            // Fallback to preset if no key
+            loadPreset();
+            return;
+          }
+
+          loading.value = true;
+          const levelInfo = schoolLevels.find(l => l.id === selectedLevel.value);
+          const catInfo = categories.find(c => c.id === selectedCategory.value);
+
+          const systemPrompt = `You are a professional English language educator specializing in Taiwan's curriculum standards (國小, 國中, 高中, 大學) and TOEIC preparation.
+Return a structured JSON object representing an English daily learning card tailored strictly to the specified level.`;
+
+          const userPrompt = `Target Level: ${levelInfo.name} (CEFR: ${levelInfo.cefr})
+Target TOEIC Score: ${selectedToeic.value}+
+Category: ${catInfo.name}
+
+Generate a high-quality daily English learning card JSON adhering strictly to this JSON schema:
+{
+  "level": "${selectedLevel.value}",
+  "toeicTarget": "${selectedToeic.value}",
+  "cefr": "${levelInfo.cefr}",
+  "englishSentence": "Single clear English sentence or proverb appropriate for this level",
+  "chineseTranslation": "Traditional Chinese translation",
+  "authorOrContext": "Author name or context (optional)",
+  "fullIpa": "Full IPA phonetic transcription of the sentence",
+  "vocabulary": [
+    {
+      "word": "word or phrase",
+      "pos": "n./v./adj./phr.",
+      "ipa": "word ipa",
+      "meaning": "Traditional Chinese meaning",
+      "example": "Simple example sentence"
+    }
+  ],
+  "grammarNotes": [
+    "Grammar point 1 in Traditional Chinese",
+    "Grammar point 2 in Traditional Chinese"
+  ],
+  "ttsScript": {
+    "chunkedSentence": "Sentence with pauses (marked with ·) and stressed syllables capitalized",
+    "linkingRules": [
+      {
+        "phrase": "words linked",
+        "ipa": "linking ipa",
+        "rule": "Explanation of linking / flap T / elision in Traditional Chinese"
+      }
+    ],
+    "intonationTips": "Guidance on rising/falling pitch in Traditional Chinese"
+  },
+  "shadowingChallenge": {
+    "instruction": "Instruction for sentence pattern practice",
+    "template": "Sentence template for substitution",
+    "examples": [
+      { "en": "English example 1", "zh": "Chinese translation 1" },
+      { "en": "English example 2", "zh": "Chinese translation 2" }
+    ]
+  }
+}`;
+
+          try {
+            const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-3-flash-preview:generateContent?key=${keyToUse}`;
+            
+            const response = await fetch(apiUrl, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                contents: [{ parts: [{ text: userPrompt }] }],
+                systemInstruction: { parts: [{ text: systemPrompt }] },
+                generationConfig: {
+                  responseMimeType: "application/json"
+                }
+              })
+            });
+
+            const data = await response.json();
+            if (data.candidates && data.candidates[0].content.parts[0].text) {
+              const cardData = JSON.parse(data.candidates[0].content.parts[0].text);
+              currentCard.value = cardData;
+            } else {
+              loadPreset();
+            }
+          } catch (err) {
+            console.error('Error generating content:', err);
+            loadPreset();
+          } finally {
+            loading.value = false;
+          }
+        };
+
+        const loadPreset = () => {
+          if (presetCards[selectedLevel.value]) {
+            currentCard.value = presetCards[selectedLevel.value];
+          } else {
+            currentCard.value = presetCards['junior'];
+          }
+        };
+
+        let currentAudio = null;
+
+        const audioStatusText = computed(() => {
+          if (audioStatus.value === 'loading') return '語音合成中...';
+          if (audioStatus.value === 'playing') return '正朗讀中 (可調速)';
+          return '點擊播放語音指南';
+        });
+
+        const setPlaybackRate = (rate) => {
+          playbackRate.value = rate;
+          if (currentAudio) {
+            currentAudio.playbackRate = rate;
+          }
+        };
+
+        // Convert Base64 PCM 16-bit to WAV Blob
+        const pcmToWavBlob = (base64Pcm, sampleRate = 24000) => {
+          const binaryStr = atob(base64Pcm);
+          const len = binaryStr.length;
+          const bytes = new Uint8Array(len);
+          for (let i = 0; i < len; i++) {
+            bytes[i] = binaryStr.charCodeAt(i);
+          }
+          
+          const pcm16 = new Int16Array(bytes.buffer);
+          const numChannels = 1;
+          const bytesPerSample = 2;
+          const dataSize = pcm16.length * bytesPerSample;
+          const buffer = new ArrayBuffer(44 + dataSize);
+          const view = new DataView(buffer);
+
+          const writeString = (v, offset, str) => {
+            for (let i = 0; i < str.length; i++) {
+              v.setUint8(offset + i, str.charCodeAt(i));
+            }
+          };
+
+          writeString(view, 0, 'RIFF');
+          view.setUint32(4, 36 + dataSize, true);
+          writeString(view, 8, 'WAVE');
+          writeString(view, 12, 'fmt ');
+          view.setUint32(16, 16, true);
+          view.setUint16(20, 1, true); // PCM format
+          view.setUint16(22, numChannels, true);
+          view.setUint32(24, sampleRate, true);
+          view.setUint32(28, sampleRate * numChannels * bytesPerSample, true);
+          view.setUint16(32, numChannels * bytesPerSample, true);
+          view.setUint16(34, 16, true);
+          writeString(view, 36, 'data');
+          view.setUint32(40, dataSize, true);
+
+          const output = new Int16Array(buffer, 44);
+          output.set(pcm16);
+
+          return new Blob([buffer], { type: 'audio/wav' });
+        };
+
+        // Play TTS Audio
+        const playTTS = async () => {
+          if (!currentCard.value) return;
+
+          if (currentAudio && audioStatus.value === 'playing') {
+            currentAudio.pause();
+            audioStatus.value = 'stopped';
+            return;
+          }
+
+          const textToSpeak = currentCard.value.englishSentence;
+
+          // Mode 1: Gemini Audio API
+          if (ttsMode.value === 'gemini' && userApiKey.value.trim()) {
+            audioStatus.value = 'loading';
+            try {
+              const apiKey = userApiKey.value.trim();
+              const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-tts:generateContent?key=${apiKey}`;
+
+              const response = await fetch(apiUrl, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                  contents: [{ parts: [{ text: `Read with standard clear American pronunciation: ${textToSpeak}` }] }],
+                  generationConfig: {
+                    responseModalities: ["AUDIO"],
+                    speechConfig: {
+                      voiceConfig: {
+                        prebuiltVoiceConfig: { voiceName: selectedVoice.value }
+                      }
+                    }
+                  }
+                })
+              });
+
+              const result = await response.json();
+              const part = result?.candidates?.[0]?.content?.parts?.[0];
+              const audioData = part?.inlineData?.data;
+              const mimeType = part?.inlineData?.mimeType;
+
+              if (audioData) {
+                const sampleRate = mimeType && mimeType.includes('rate=') 
+                  ? parseInt(mimeType.match(/rate=(\d+)/)[1], 10) 
+                  : 24000;
+                
+                const wavBlob = pcmToWavBlob(audioData, sampleRate);
+                const audioUrl = URL.createObjectURL(wavBlob);
+                
+                if (currentAudio) currentAudio.pause();
+                currentAudio = new Audio(audioUrl);
+                currentAudio.playbackRate = playbackRate.value;
+                
+                currentAudio.onplay = () => { audioStatus.value = 'playing'; };
+                currentAudio.onended = () => { audioStatus.value = 'stopped'; };
+                currentAudio.onerror = () => { fallbackWebTTS(textToSpeak); };
+
+                await currentAudio.play();
+                return;
+              }
+            } catch (err) {
+              console.warn('Gemini TTS failed, falling back to Web Speech API:', err);
+            }
+          }
+
+          // Fallback to Web Speech API
+          fallbackWebTTS(textToSpeak);
+        };
+
+        const fallbackWebTTS = (text) => {
+          if ('speechSynthesis' in window) {
+            window.speechSynthesis.cancel();
+            const utterance = new SpeechSynthesisUtterance(text);
+            utterance.lang = 'en-US';
+            utterance.rate = playbackRate.value;
+            
+            utterance.onstart = () => { audioStatus.value = 'playing'; };
+            utterance.onend = () => { audioStatus.value = 'stopped'; };
+            utterance.onerror = () => { audioStatus.value = 'stopped'; };
+            
+            window.speechSynthesis.speak(utterance);
+          } else {
+            audioStatus.value = 'stopped';
+          }
+        };
+
+        const speakSingleWord = (word) => {
+          fallbackWebTTS(word);
+        };
+
+        onMounted(() => {
+          loadPreset();
+        });
+
+        return {
+          userApiKey,
+          tempApiKey,
+          showKeyModal,
+          showKeyText,
+          showHistoryModal,
+          schoolLevels,
+          toeicLevels,
+          categories,
+          selectedLevel,
+          selectedToeic,
+          selectedCategory,
+          ttsMode,
+          selectedVoice,
+          playbackRate,
+          loading,
+          isPlayingAudio,
+          audioStatus,
+          audioStatusText,
+          activeTab,
+          currentCard,
+          favorites,
+          isFavorite,
+          saveApiKey,
+          clearApiKey,
+          getLevelLabel,
+          toggleFavorite,
+          selectFavoriteCard,
+          generateCard,
+          loadPreset,
+          playTTS,
+          setPlaybackRate,
+          speakSingleWord
+        };
+      }
+    }).mount('#app');
+  </script>
+</body>
+</html>
