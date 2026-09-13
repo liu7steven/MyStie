@@ -1,0 +1,1411 @@
+<!DOCTYPE html>
+<html lang="zh-TW" class="h-full bg-slate-900 text-slate-100">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>每日喝開水統計與記錄 - Hydration Pro</title>
+  <!-- Tailwind CSS -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <!-- FontAwesome Icons -->
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+  <!-- Chart.js -->
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <!-- Canvas Confetti -->
+  <script src="https://cdn.jsdelivr.net/npm/canvas-confetti@1.6.0/dist/confetti.browser.min.js"></script>
+  
+  <script type="module">
+    import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
+    import { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+    import { getFirestore, doc, setDoc, getDoc, collection, onSnapshot, addDoc, deleteDoc } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+
+    // Application & Auth Setup
+    const appId = typeof __app_id !== 'undefined' ? __app_id : 'hydration-pro-app';
+    const firebaseConfig = typeof __firebase_config !== 'undefined' 
+      ? JSON.parse(__firebase_config) 
+      : { apiKey: "demo", authDomain: "demo", projectId: "demo" };
+
+    const app = initializeApp(firebaseConfig);
+    const auth = getAuth(app);
+    const db = getFirestore(app);
+
+    window.db = db;
+    window.auth = auth;
+    window.appId = appId;
+    window.firebaseUtils = { doc, setDoc, getDoc, collection, onSnapshot, addDoc, deleteDoc };
+
+    // Authenticate and initialize Firestore listeners
+    async function initCloudSync() {
+      try {
+        if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
+          await signInWithCustomToken(auth, __initial_auth_token);
+        } else {
+          await signInAnonymously(auth);
+        }
+      } catch (err) {
+        console.warn("Firebase Auth fallback to anonymous:", err);
+        try {
+          await signInAnonymously(auth);
+        } catch (e) {
+          console.error("Auth failed:", e);
+        }
+      }
+
+      onAuthStateChanged(auth, (user) => {
+        if (user) {
+          window.userId = user.uid;
+          setupFirestoreListeners(user.uid);
+        }
+      });
+    }
+
+    function setupFirestoreListeners(uid) {
+      if (!uid) return;
+
+      // Realtime listener for logs collection
+      const logsCollection = collection(db, 'artifacts', appId, 'users', uid, 'logs');
+      onSnapshot(logsCollection, (snapshot) => {
+        const loadedLogs = {};
+        snapshot.docs.forEach(docSnap => {
+          const data = docSnap.data();
+          if (data.dateStr) {
+            if (!loadedLogs[data.dateStr]) loadedLogs[data.dateStr] = [];
+            loadedLogs[data.dateStr].push({ ...data, firestoreId: docSnap.id });
+          }
+        });
+        window.appLogs = loadedLogs;
+        if (typeof window.updateDashboardUI === 'function') {
+          window.updateDashboardUI();
+        }
+      }, (error) => {
+        console.warn("Firestore logs listener warning:", error);
+      });
+
+      // Realtime listener for settings & goal
+      const settingsDocRef = doc(db, 'artifacts', appId, 'users', uid, 'settings', 'user_settings');
+      onSnapshot(settingsDocRef, (docSnap) => {
+        if (docSnap.exists()) {
+          const data = docSnap.data();
+          if (data.dailyGoal) {
+            window.dailyGoal = data.dailyGoal;
+            const goalEl = document.getElementById('daily-goal-num');
+            if (goalEl) goalEl.textContent = data.dailyGoal;
+          }
+          if (data.reminderSettings) {
+            window.reminderSettings = data.reminderSettings;
+            const intervalEl = document.getElementById('reminder-interval');
+            const soundEl = document.getElementById('sound-toggle');
+            if (intervalEl) intervalEl.value = data.reminderSettings.intervalMinutes || 60;
+            if (soundEl) soundEl.checked = data.reminderSettings.sound !== false;
+            if (typeof window.setupReminderTimer === 'function') window.setupReminderTimer();
+          }
+          if (typeof window.updateDashboardUI === 'function') {
+            window.updateDashboardUI();
+          }
+        }
+      }, (error) => {
+        console.warn("Firestore settings listener warning:", error);
+      });
+    }
+
+    initCloudSync();
+  </script>
+  <script>
+    tailwind.config = {
+      darkMode: 'class',
+      theme: {
+        extend: {
+          colors: {
+            water: {
+              50: '#f0f9ff',
+              100: '#e0f2fe',
+              200: '#bae6fd',
+              300: '#7dd3fc',
+              400: '#38bdf8',
+              500: '#0ea5e9',
+              600: '#0284c7',
+              700: '#0369a1',
+              800: '#075985',
+              900: '#0c4a6e',
+            }
+          },
+          animation: {
+            'wave-slow': 'wave 8s linear infinite',
+            'wave-fast': 'wave 4s linear infinite',
+          },
+          keyframes: {
+            wave: {
+              '0%': { transform: 'rotate(0deg)' },
+              '100%': { transform: 'rotate(360deg)' }
+            }
+          }
+        }
+      }
+    }
+  </script>
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
+    body { font-family: 'Inter', system-ui, -apple-system, sans-serif; }
+    
+    .water-wave {
+      position: absolute;
+      width: 200%;
+      height: 200%;
+      top: -150%;
+      left: -50%;
+      border-radius: 40%;
+      background-color: rgba(14, 165, 233, 0.4);
+      animation: wave 10s infinite linear;
+      transition: top 0.8s cubic-bezier(0.4, 0, 0.2, 1);
+    }
+    .water-wave-bg {
+      position: absolute;
+      width: 200%;
+      height: 200%;
+      top: -145%;
+      left: -50%;
+      border-radius: 38%;
+      background-color: rgba(56, 189, 248, 0.25);
+      animation: wave 14s infinite linear;
+      transition: top 0.8s cubic-bezier(0.4, 0, 0.2, 1);
+    }
+
+    /* Pomeranian Custom Animations */
+    @keyframes tailWag {
+      0%, 100% { transform: rotate(0deg); }
+      50% { transform: rotate(22deg); }
+    }
+    @keyframes earWiggle {
+      0%, 100% { transform: rotate(0deg); }
+      50% { transform: rotate(-8deg); }
+    }
+    @keyframes happyBounce {
+      0%, 100% { transform: translateY(0); }
+      50% { transform: translateY(-7px); }
+    }
+    @keyframes floatHeart {
+      0% { opacity: 1; transform: translateY(0) scale(0.8); }
+      100% { opacity: 0; transform: translateY(-40px) scale(1.3); }
+    }
+
+    .animate-tail { transform-origin: bottom left; animation: tailWag 0.5s infinite ease-in-out; }
+    .animate-ear { transform-origin: bottom center; animation: earWiggle 1.6s infinite ease-in-out; }
+    .animate-pomeranian-bounce { animation: happyBounce 1.2s infinite ease-in-out; }
+    .heart-effect { position: absolute; animation: floatHeart 1s forwards ease-out; pointer-events: none; color: #f43f5e; font-size: 1.25rem; z-index: 40; }
+
+    ::-webkit-scrollbar {
+      width: 6px;
+      height: 6px;
+    }
+    ::-webkit-scrollbar-track {
+      background: rgba(15, 23, 42, 0.6);
+    }
+    ::-webkit-scrollbar-thumb {
+      background: rgba(56, 189, 248, 0.3);
+      border-radius: 3px;
+    }
+    ::-webkit-scrollbar-thumb:hover {
+      background: rgba(56, 189, 248, 0.6);
+    }
+  </style>
+</head>
+<body class="h-full flex flex-col antialiased selection:bg-water-500 selection:text-white">
+
+  <!-- Header Banner -->
+  <header class="bg-slate-900/90 backdrop-blur-md border-b border-slate-800 sticky top-0 z-30 px-4 py-3 sm:px-6">
+    <div class="max-w-6xl mx-auto flex items-center justify-between">
+      <div class="flex items-center gap-3">
+        <div class="w-10 h-10 rounded-2xl bg-gradient-to-tr from-water-600 to-cyan-400 flex items-center justify-center shadow-lg shadow-water-500/20 text-white font-bold text-xl">
+          <i class="fa-solid fa-droplet animate-pulse"></i>
+        </div>
+        <div>
+          <h1 class="font-bold text-lg sm:text-xl text-white tracking-wide flex items-center gap-2">
+            每日喝開水記錄
+            <span class="text-xs bg-water-500/20 text-water-300 font-medium px-2 py-0.5 rounded-full border border-water-500/30">Hydration Pro</span>
+          </h1>
+          <p class="text-xs text-slate-400" id="current-date-str">載入中...</p>
+        </div>
+      </div>
+
+      <!-- Actions -->
+      <div class="flex items-center gap-2 sm:gap-3">
+        <!-- Streak Badge -->
+        <div class="flex items-center gap-1.5 bg-slate-800 border border-slate-700/60 px-3 py-1.5 rounded-xl text-amber-400 font-semibold text-xs sm:text-sm shadow-inner" title="連續達標天數">
+          <i class="fa-solid fa-fire text-amber-500 animate-bounce"></i>
+          <span id="streak-count">0</span> 天達標
+        </div>
+
+        <!-- Urine Color Check Trigger -->
+        <button onclick="toggleUrineModal()" class="px-3 py-1.5 rounded-xl bg-amber-500/10 hover:bg-amber-500/20 border border-amber-500/30 text-amber-300 text-xs font-semibold flex items-center gap-1.5 transition" title="觀察尿液顏色">
+          <i class="fa-solid fa-vial"></i>
+          <span class="hidden sm:inline">觀察尿液顏色</span>
+        </button>
+
+        <!-- Reminders toggle button -->
+        <button id="reminder-btn" onclick="toggleReminderModal()" class="p-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-300 hover:text-white transition relative" title="喝水提醒設定">
+          <i class="fa-regular fa-bell"></i>
+          <span id="reminder-indicator" class="hidden absolute top-1.5 right-1.5 w-2 h-2 bg-emerald-500 rounded-full"></span>
+        </button>
+
+        <!-- Settings Modal button -->
+        <button onclick="toggleSettingsModal()" class="p-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-300 hover:text-white transition" title="系統設定">
+          <i class="fa-solid fa-gear"></i>
+        </button>
+      </div>
+    </div>
+  </header>
+
+  <main class="flex-1 max-w-6xl w-full mx-auto px-4 py-6 sm:px-6 space-y-6">
+
+    <!-- Health Tip Banner (User Input 1 & 2 integration) -->
+    <div class="bg-gradient-to-r from-water-950/80 via-slate-800 to-slate-800 border border-water-500/30 rounded-2xl p-4 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 shadow-lg">
+      <div class="flex items-start gap-3">
+        <div class="w-9 h-9 rounded-xl bg-water-500/20 text-water-400 border border-water-500/30 flex items-center justify-center shrink-0 mt-0.5 sm:mt-0">
+          <i class="fa-solid fa-lightbulb text-base"></i>
+        </div>
+        <div class="text-xs space-y-1">
+          <p class="font-bold text-water-200">💡 每日健康補水黃金法則</p>
+          <p class="text-slate-300 leading-relaxed">
+            1. 一般健康成人每天約需攝取 <span class="text-water-300 font-semibold">1,500 ~ 2,400 ml</span> 液態水，或依公式 <span class="text-emerald-300 font-semibold">「體重 (kg) × 30 ~ 40 ml」</span> 計算。<br>
+            2. 最直覺的水分評估方式：點擊右側按鈕<span class="text-amber-300 font-semibold">「觀察尿液顏色」</span>檢查水分平衡。
+          </p>
+        </div>
+      </div>
+      <button onclick="toggleUrineModal()" class="shrink-0 px-3.5 py-2 bg-amber-500/20 hover:bg-amber-500/30 text-amber-200 border border-amber-500/40 text-xs font-semibold rounded-xl transition flex items-center gap-1.5 self-end sm:self-auto">
+        <i class="fa-solid fa-flask"></i> 檢測尿液顏色
+      </button>
+    </div>
+
+    <!-- Top Dashboard Grid -->
+    <div class="grid grid-cols-1 lg:grid-cols-12 gap-6">
+      
+      <!-- Visualizer Card (5 cols) -->
+      <div class="lg:col-span-5 bg-slate-800/60 border border-slate-700/60 rounded-3xl p-6 flex flex-col justify-between shadow-xl relative overflow-hidden backdrop-blur-sm">
+        <div class="flex justify-between items-start z-10">
+          <div>
+            <h2 class="text-sm font-semibold text-slate-400 uppercase tracking-wider">今日飲水進度</h2>
+            <div class="flex items-baseline gap-2 mt-1">
+              <span id="current-intake-num" class="text-4xl sm:text-5xl font-black text-white tracking-tight">0</span>
+              <span class="text-slate-400 text-sm font-medium">/ <span id="daily-goal-num">2000</span> ml</span>
+            </div>
+          </div>
+          <button onclick="openGoalCalculator()" class="text-xs bg-water-500/10 hover:bg-water-500/20 text-water-300 border border-water-500/30 px-3 py-1.5 rounded-xl transition flex items-center gap-1.5 font-medium">
+            <i class="fa-solid fa-calculator"></i> 目標試算
+          </button>
+        </div>
+
+        <!-- Interactive Pomeranian Dog Companion & Water Glass Side-by-Side Container -->
+        <div class="my-5 flex flex-col sm:flex-row items-center justify-around gap-4 relative z-10">
+          
+          <!-- Interactive Pomeranian Mascot Box -->
+          <div class="flex flex-col items-center relative group">
+            
+            <!-- Speech Bubble -->
+            <div id="pom-speech-bubble" class="relative mb-2 bg-amber-500/15 border border-amber-500/30 text-amber-200 px-3 py-1.5 rounded-2xl text-[11px] font-semibold text-center shadow-lg transition-all duration-300 max-w-[170px]">
+              <span id="pom-speech-text">主人快補充水分汪！寶貝博美陪你一起喝～ 🐾</span>
+              <div class="absolute -bottom-1.5 left-1/2 -translate-x-1/2 w-3 h-3 bg-amber-500/15 border-r border-b border-amber-500/30 transform rotate-45"></div>
+            </div>
+
+            <!-- Pomeranian SVG Graphic -->
+            <div id="pomeranian-character" onclick="interactWithPomeranian(event)" class="w-36 h-36 relative cursor-pointer hover:scale-105 active:scale-95 transition-transform duration-200 animate-pomeranian-bounce select-none" title="點擊摸摸博美狗！">
+              
+              <!-- Sparkle/Hearts Container -->
+              <div id="pom-hearts-container" class="absolute inset-0 pointer-events-none"></div>
+
+              <svg viewBox="0 0 200 200" class="w-full h-full drop-shadow-xl">
+                <!-- Tail (Wagging) -->
+                <path d="M 40,110 C 10,80 15,40 45,50 C 60,55 55,85 40,110 Z" fill="#fb923c" class="animate-tail"/>
+                <path d="M 42,105 C 20,78 22,48 44,55 C 55,60 52,82 42,105 Z" fill="#ffedd5" class="animate-tail"/>
+
+                <!-- Back Legs -->
+                <ellipse cx="65" cy="155" rx="16" ry="22" fill="#ea580c"/>
+                <ellipse cx="135" cy="155" rx="16" ry="22" fill="#ea580c"/>
+                <ellipse cx="65" cy="172" rx="14" ry="8" fill="#fdba74"/>
+                <ellipse cx="135" cy="172" rx="14" ry="8" fill="#fdba74"/>
+
+                <!-- Body Fluff -->
+                <circle cx="100" cy="130" r="48" fill="#fb923c"/>
+                <circle cx="100" cy="132" r="40" fill="#fed7aa"/>
+
+                <!-- Front Paws -->
+                <ellipse cx="82" cy="165" rx="12" ry="16" fill="#f97316"/>
+                <ellipse cx="118" cy="165" rx="12" ry="16" fill="#f97316"/>
+                <ellipse cx="82" cy="176" rx="10" ry="7" fill="#ffedd5"/>
+                <ellipse cx="118" cy="176" rx="10" ry="7" fill="#ffedd5"/>
+
+                <!-- Ears -->
+                <g class="animate-ear">
+                  <path d="M 60,75 L 42,32 Q 65,35 78,65 Z" fill="#ea580c"/>
+                  <path d="M 62,70 L 48,38 Q 66,42 74,62 Z" fill="#fca5a5"/>
+                </g>
+                <g class="animate-ear" style="animation-delay: 0.3s;">
+                  <path d="M 140,75 L 158,32 Q 135,35 122,65 Z" fill="#ea580c"/>
+                  <path d="M 138,70 L 152,38 Q 134,42 126,62 Z" fill="#fca5a5"/>
+                </g>
+
+                <!-- Head Puff -->
+                <circle cx="100" cy="85" r="44" fill="#fb923c"/>
+                <circle cx="100" cy="88" r="36" fill="#ffedd5"/>
+                <!-- Cheeks Fluff -->
+                <circle cx="68" cy="98" r="18" fill="#fdba74"/>
+                <circle cx="132" cy="98" r="18" fill="#fdba74"/>
+
+                <!-- Eyes -->
+                <circle id="pom-eye-left" cx="80" cy="80" r="7" fill="#1e293b"/>
+                <circle id="pom-eye-right" cx="120" cy="80" r="7" fill="#1e293b"/>
+                <circle cx="78" cy="78" r="2.5" fill="#ffffff"/>
+                <circle cx="118" cy="78" r="2.5" fill="#ffffff"/>
+
+                <!-- Blush -->
+                <ellipse cx="70" cy="92" rx="7" ry="4" fill="#f43f5e" opacity="0.4"/>
+                <ellipse cx="130" cy="92" rx="7" ry="4" fill="#f43f5e" opacity="0.4"/>
+
+                <!-- Muzzle / Snout -->
+                <ellipse cx="100" cy="94" rx="13" ry="10" fill="#ffffff"/>
+                <ellipse cx="100" cy="89" rx="6" ry="4" fill="#0f172a"/>
+
+                <!-- Tongue / Mouth (Dynamic) -->
+                <path id="pom-mouth" d="M 94,96 Q 100,100 106,96" stroke="#0f172a" stroke-width="2.5" fill="none" stroke-linecap="round"/>
+                <path id="pom-tongue" d="M 97,97 Q 100,108 103,97 Z" fill="#f43f5e"/>
+
+                <!-- Party Hat (Shown when goal reached) -->
+                <g id="pom-party-hat" class="hidden">
+                  <polygon points="100,20 85,55 115,55" fill="#0ea5e9"/>
+                  <circle cx="100" cy="18" r="5" fill="#f59e0b"/>
+                  <path d="M 85,55 Q 100,60 115,55" stroke="#f59e0b" stroke-width="3" fill="none"/>
+                </g>
+              </svg>
+            </div>
+
+            <!-- Pet Action Badge -->
+            <button onclick="interactWithPomeranian(event)" class="mt-1 text-[11px] bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 border border-amber-500/40 px-2.5 py-1 rounded-full transition flex items-center gap-1 font-semibold">
+              <i class="fa-solid fa-paw text-amber-400"></i>
+              <span>摸摸博美狗 🐾</span>
+            </button>
+          </div>
+
+          <!-- Glass Jar Liquid Animation -->
+          <div class="relative w-36 h-48 border-4 border-slate-600/60 rounded-b-3xl rounded-t-xl bg-slate-900/50 p-2 shadow-2xl flex flex-col justify-end overflow-hidden group shrink-0">
+            
+            <div class="absolute right-1.5 top-3 bottom-3 flex flex-col justify-between text-[9px] text-slate-500 font-mono z-20 pointer-events-none select-none">
+              <span>100%</span>
+              <span>75%</span>
+              <span>50%</span>
+              <span>25%</span>
+              <span>0%</span>
+            </div>
+
+            <div class="w-full relative rounded-b-2xl overflow-hidden transition-all duration-700" id="jar-liquid-container" style="height: 0%;">
+              <div class="absolute inset-0 bg-gradient-to-t from-water-700 via-water-500 to-cyan-400 opacity-90"></div>
+              <div class="water-wave" id="wave-fg"></div>
+              <div class="water-wave-bg" id="wave-bg"></div>
+            </div>
+
+            <div class="absolute top-2 left-2.5 w-1.5 h-40 bg-white/10 rounded-full pointer-events-none z-20"></div>
+
+            <div class="absolute inset-0 flex flex-col items-center justify-center z-20 pointer-events-none">
+              <span id="percentage-num" class="text-2xl font-black text-white drop-shadow-[0_2px_4px_rgba(0,0,0,0.8)]">0%</span>
+              <span id="remaining-text" class="text-[11px] font-semibold text-slate-200 drop-shadow-[0_1px_2px_rgba(0,0,0,0.8)] mt-0.5">還差 2000 ml</span>
+            </div>
+          </div>
+
+        </div>
+
+        <!-- Quick Water Add Grid -->
+        <div class="z-10 space-y-3">
+          <div class="flex items-center justify-between text-xs text-slate-400 font-medium">
+            <span>快速記錄喝水量</span>
+            <span class="text-water-400 cursor-pointer hover:underline" onclick="toggleCustomAddModal()">自訂容量 / 飲品類別</span>
+          </div>
+          <div class="grid grid-cols-4 gap-2">
+            <button onclick="quickAddWater(150, '小水杯')" class="flex flex-col items-center justify-center p-2.5 bg-slate-700/50 hover:bg-water-600/30 border border-slate-600/50 hover:border-water-500/50 rounded-2xl transition group active:scale-95">
+              <i class="fa-solid fa-glass-water text-water-400 group-hover:scale-110 transition text-lg mb-1"></i>
+              <span class="text-xs font-bold text-white">150ml</span>
+              <span class="text-[10px] text-slate-400">小水杯</span>
+            </button>
+            <button onclick="quickAddWater(250, '馬克杯')" class="flex flex-col items-center justify-center p-2.5 bg-slate-700/50 hover:bg-water-600/30 border border-slate-600/50 hover:border-water-500/50 rounded-2xl transition group active:scale-95">
+              <i class="fa-solid fa-mug-hot text-amber-400 group-hover:scale-110 transition text-lg mb-1"></i>
+              <span class="text-xs font-bold text-white">250ml</span>
+              <span class="text-[10px] text-slate-400">馬克杯</span>
+            </button>
+            <button onclick="quickAddWater(500, '寶特瓶')" class="flex flex-col items-center justify-center p-2.5 bg-slate-700/50 hover:bg-water-600/30 border border-slate-600/50 hover:border-water-500/50 rounded-2xl transition group active:scale-95">
+              <i class="fa-solid fa-bottle-water text-cyan-400 group-hover:scale-110 transition text-lg mb-1"></i>
+              <span class="text-xs font-bold text-white">500ml</span>
+              <span class="text-[10px] text-slate-400">寶特瓶</span>
+            </button>
+            <button onclick="quickAddWater(750, '大水壺')" class="flex flex-col items-center justify-center p-2.5 bg-slate-700/50 hover:bg-water-600/30 border border-slate-600/50 hover:border-water-500/50 rounded-2xl transition group active:scale-95">
+              <i class="fa-solid fa-whiskey-glass text-emerald-400 group-hover:scale-110 transition text-lg mb-1"></i>
+              <span class="text-xs font-bold text-white">750ml</span>
+              <span class="text-[10px] text-slate-400">大水壺</span>
+            </button>
+          </div>
+          <button onclick="toggleCustomAddModal()" class="w-full py-2.5 bg-gradient-to-r from-water-600 to-cyan-600 hover:from-water-500 hover:to-cyan-500 text-white font-semibold text-sm rounded-xl shadow-lg shadow-water-600/30 transition flex items-center justify-center gap-2 active:scale-[0.98]">
+            <i class="fa-solid fa-plus"></i> 自訂喝水紀錄
+          </button>
+        </div>
+      </div>
+
+      <!-- Details & Timeline Card (7 cols) -->
+      <div class="lg:col-span-7 space-y-6 flex flex-col justify-between">
+        
+        <!-- Timeline Log -->
+        <div class="bg-slate-800/60 border border-slate-700/60 rounded-3xl p-6 shadow-xl flex-1 flex flex-col">
+          <div class="flex items-center justify-between mb-4">
+            <h2 class="text-base font-bold text-white flex items-center gap-2">
+              <i class="fa-solid fa-list-check text-water-400"></i>
+              今日飲水紀錄明細
+            </h2>
+            <span id="log-count-badge" class="text-xs bg-slate-700 text-slate-300 font-medium px-2.5 py-1 rounded-full">共 0 筆</span>
+          </div>
+
+          <div id="today-logs-list" class="flex-1 overflow-y-auto max-h-[280px] sm:max-h-[320px] pr-1 space-y-2.5 my-2">
+            <div class="h-40 flex flex-col items-center justify-center text-slate-500 space-y-2">
+              <i class="fa-solid fa-faucet-drip text-3xl text-slate-600"></i>
+              <p class="text-sm">今日尚無飲水紀錄，快來喝第一杯水吧！</p>
+            </div>
+          </div>
+
+          <div class="pt-3 border-t border-slate-700/60 flex items-center justify-between text-xs text-slate-400">
+            <span>建議原則：分次少量補充，每次約 200~300 ml</span>
+            <button onclick="clearTodayLogs()" class="text-rose-400 hover:text-rose-300 transition text-xs flex items-center gap-1">
+              <i class="fa-regular fa-trash-can"></i> 清除今日
+            </button>
+          </div>
+        </div>
+
+        <!-- Next Reminder Card -->
+        <div class="bg-gradient-to-r from-slate-800 to-slate-800/90 border border-slate-700/60 rounded-2xl p-4 flex items-center justify-between shadow-lg">
+          <div class="flex items-center gap-3">
+            <div class="w-10 h-10 rounded-xl bg-amber-500/10 text-amber-400 border border-amber-500/20 flex items-center justify-center text-lg">
+              <i class="fa-solid fa-clock"></i>
+            </div>
+            <div>
+              <p class="text-xs text-slate-400 font-medium">下一次喝水提醒</p>
+              <p id="next-reminder-time" class="text-sm font-bold text-white">未啟用計時提醒</p>
+            </div>
+          </div>
+          <button onclick="toggleReminderModal()" class="px-3.5 py-2 bg-slate-700 hover:bg-slate-600 text-slate-200 text-xs font-semibold rounded-xl transition">
+            設定提醒
+          </button>
+        </div>
+
+      </div>
+    </div>
+
+    <!-- Analytics Section -->
+    <div class="bg-slate-800/60 border border-slate-700/60 rounded-3xl p-6 shadow-xl space-y-4">
+      <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+        <div>
+          <h2 class="text-lg font-bold text-white flex items-center gap-2">
+            <i class="fa-solid fa-chart-column text-water-400"></i>
+            飲水數據統計分析
+          </h2>
+          <p class="text-xs text-slate-400">掌握你的近一週與近一月飲水習慣變化</p>
+        </div>
+
+        <div class="flex items-center bg-slate-900/80 p-1 rounded-xl border border-slate-700/60 text-xs self-start sm:self-auto">
+          <button id="tab-btn-week" onclick="switchChartTab('week')" class="px-3 py-1.5 rounded-lg font-medium text-white bg-water-600 transition">
+            本週統計
+          </button>
+          <button id="tab-btn-month" onclick="switchChartTab('month')" class="px-3 py-1.5 rounded-lg font-medium text-slate-400 hover:text-white transition">
+            本月趨勢
+          </button>
+        </div>
+      </div>
+
+      <!-- Stat Cards -->
+      <div class="grid grid-cols-2 sm:grid-cols-4 gap-3 pt-2">
+        <div class="bg-slate-900/40 border border-slate-700/40 p-3.5 rounded-2xl">
+          <p class="text-[11px] text-slate-400 font-medium">週平均日喝水量</p>
+          <p id="stat-weekly-avg" class="text-lg sm:text-xl font-bold text-water-300 mt-1">0 ml</p>
+        </div>
+        <div class="bg-slate-900/40 border border-slate-700/40 p-3.5 rounded-2xl">
+          <p class="text-[11px] text-slate-400 font-medium">單日最高紀錄</p>
+          <p id="stat-max-day" class="text-lg sm:text-xl font-bold text-emerald-400 mt-1">0 ml</p>
+        </div>
+        <div class="bg-slate-900/40 border border-slate-700/40 p-3.5 rounded-2xl">
+          <p class="text-[11px] text-slate-400 font-medium">總累計攝水量</p>
+          <p id="stat-total-intake" class="text-lg sm:text-xl font-bold text-purple-400 mt-1">0 L</p>
+        </div>
+        <div class="bg-slate-900/40 border border-slate-700/40 p-3.5 rounded-2xl">
+          <p class="text-[11px] text-slate-400 font-medium">本月達標率</p>
+          <p id="stat-monthly-rate" class="text-lg sm:text-xl font-bold text-amber-400 mt-1">0%</p>
+        </div>
+      </div>
+
+      <div class="relative w-full h-64 sm:h-72 pt-4">
+        <canvas id="hydrationChart"></canvas>
+      </div>
+    </div>
+
+  </main>
+
+  <footer class="mt-auto border-t border-slate-800 py-4 text-center text-xs text-slate-500">
+    <p>每日喝開水統計與記錄 Pro &copy; 2026 - 健康生活，從多喝水開始</p>
+  </footer>
+
+  <!-- MODAL: Custom Drink Add -->
+  <div id="modal-custom-add" class="fixed inset-0 bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-4 z-50 hidden">
+    <div class="bg-slate-800 border border-slate-700 rounded-3xl max-w-md w-full p-6 shadow-2xl space-y-5">
+      <div class="flex items-center justify-between">
+        <h3 class="text-lg font-bold text-white flex items-center gap-2">
+          <i class="fa-solid fa-plus-circle text-water-400"></i>
+          自訂新增飲水紀錄
+        </h3>
+        <button onclick="toggleCustomAddModal()" class="text-slate-400 hover:text-white text-lg">
+          <i class="fa-solid fa-xmark"></i>
+        </button>
+      </div>
+
+      <form id="custom-add-form" onsubmit="handleCustomAddSubmit(event)" class="space-y-4">
+        <div>
+          <label class="block text-xs font-medium text-slate-300 mb-1.5">飲水量 (ml)</label>
+          <div class="relative">
+            <input type="number" id="input-amount" min="10" max="3000" step="10" value="300" required class="w-full bg-slate-900 border border-slate-700 rounded-xl px-4 py-2.5 text-white focus:outline-none focus:border-water-500 text-lg font-bold">
+            <span class="absolute right-4 top-3 text-sm font-semibold text-slate-400">ml</span>
+          </div>
+        </div>
+
+        <div>
+          <label class="block text-xs font-medium text-slate-300 mb-1.5">飲料類別</label>
+          <div class="grid grid-cols-3 gap-2">
+            <button type="button" onclick="selectBeverage('開水', 'fa-droplet', 'text-water-400')" class="bev-opt p-2.5 border border-water-500 bg-water-500/10 rounded-xl flex items-center justify-center gap-2 text-xs font-medium text-white">
+              <i class="fa-solid fa-droplet text-water-400"></i> 開水
+            </button>
+            <button type="button" onclick="selectBeverage('無糖茶', 'fa-leaf', 'text-emerald-400')" class="bev-opt p-2.5 border border-slate-700 bg-slate-900/60 rounded-xl flex items-center justify-center gap-2 text-xs font-medium text-slate-300">
+              <i class="fa-solid fa-leaf text-emerald-400"></i> 無糖茶
+            </button>
+            <button type="button" onclick="selectBeverage('咖啡', 'fa-mug-hot', 'text-amber-600')" class="bev-opt p-2.5 border border-slate-700 bg-slate-900/60 rounded-xl flex items-center justify-center gap-2 text-xs font-medium text-slate-300">
+              <i class="fa-solid fa-mug-hot text-amber-600"></i> 咖啡
+            </button>
+            <button type="button" onclick="selectBeverage('氣泡水', 'fa-wine-bottle', 'text-cyan-300')" class="bev-opt p-2.5 border border-slate-700 bg-slate-900/60 rounded-xl flex items-center justify-center gap-2 text-xs font-medium text-slate-300">
+              <i class="fa-solid fa-wine-bottle text-cyan-300"></i> 氣泡水
+            </button>
+            <button type="button" onclick="selectBeverage('果汁', 'fa-citrus', 'text-orange-400')" class="bev-opt p-2.5 border border-slate-700 bg-slate-900/60 rounded-xl flex items-center justify-center gap-2 text-xs font-medium text-slate-300">
+              <i class="fa-solid fa-apple-whole text-rose-400"></i> 果汁
+            </button>
+            <button type="button" onclick="selectBeverage('牛奶', 'fa-cow', 'text-slate-100')" class="bev-opt p-2.5 border border-slate-700 bg-slate-900/60 rounded-xl flex items-center justify-center gap-2 text-xs font-medium text-slate-300">
+              <i class="fa-solid fa-cow text-slate-200"></i> 牛奶/豆漿
+            </button>
+          </div>
+        </div>
+
+        <div>
+          <label class="block text-xs font-medium text-slate-300 mb-1.5">記錄時間</label>
+          <input type="time" id="input-time" required class="w-full bg-slate-900 border border-slate-700 rounded-xl px-4 py-2 text-white focus:outline-none focus:border-water-500 text-sm">
+        </div>
+
+        <div class="flex items-center gap-3 pt-2">
+          <button type="button" onclick="toggleCustomAddModal()" class="flex-1 py-2.5 bg-slate-700 hover:bg-slate-600 text-slate-200 font-semibold text-sm rounded-xl transition">
+            取消
+          </button>
+          <button type="submit" class="flex-1 py-2.5 bg-water-600 hover:bg-water-500 text-white font-semibold text-sm rounded-xl shadow-lg shadow-water-600/30 transition">
+            確認新增
+          </button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- MODAL: Daily Goal Calculator -->
+  <div id="modal-goal-calc" class="fixed inset-0 bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-4 z-50 hidden">
+    <div class="bg-slate-800 border border-slate-700 rounded-3xl max-w-md w-full p-6 shadow-2xl space-y-5">
+      <div class="flex items-center justify-between">
+        <h3 class="text-lg font-bold text-white flex items-center gap-2">
+          <i class="fa-solid fa-calculator text-water-400"></i>
+          個人化每日建議飲水算表
+        </h3>
+        <button onclick="closeGoalCalculator()" class="text-slate-400 hover:text-white text-lg">
+          <i class="fa-solid fa-xmark"></i>
+        </button>
+      </div>
+
+      <div class="space-y-4 text-sm">
+        <div class="bg-slate-900/80 border border-slate-700/80 p-3.5 rounded-2xl text-xs space-y-1">
+          <p class="text-water-300 font-bold">📌 成人每日攝取指南：</p>
+          <p class="text-slate-300">一般健康成人每日大約需要攝取 <span class="text-white font-bold">1,500 到 2,400 ml</span> 液態水。</p>
+          <p class="text-slate-400">計算公式：<span class="text-emerald-400 font-mono font-bold">體重（公斤）× 30 ~ 40 ml</span></p>
+        </div>
+
+        <div>
+          <label class="block text-xs font-medium text-slate-300 mb-1">體重 (kg)</label>
+          <input type="number" id="calc-weight" value="65" min="30" max="200" class="w-full bg-slate-900 border border-slate-700 rounded-xl px-3.5 py-2 text-white focus:outline-none focus:border-water-500">
+        </div>
+
+        <div>
+          <label class="block text-xs font-medium text-slate-300 mb-1">每日活動與環境係數</label>
+          <select id="calc-activity" class="w-full bg-slate-900 border border-slate-700 rounded-xl px-3.5 py-2 text-white focus:outline-none focus:border-water-500">
+            <option value="30">久坐 / 一般冷氣房工作 (體重 x 30 ml)</option>
+            <option value="35" selected>輕度運動 / 輕度活動 (體重 x 35 ml)</option>
+            <option value="40">戶外工作 / 中度運動 (體重 x 40 ml)</option>
+            <option value="45">高強度運動 / 炎熱高溫環境 (體重 x 45 ml)</option>
+          </select>
+        </div>
+
+        <div class="bg-water-500/10 border border-water-500/30 p-4 rounded-2xl text-center">
+          <p class="text-xs text-slate-400">為您估算的建議每日目標</p>
+          <p id="calc-result" class="text-3xl font-black text-water-300 my-1">2275 ml</p>
+          <p class="text-[11px] text-slate-400">可依個人適應程度於首頁隨時調整</p>
+        </div>
+
+        <div class="flex items-center gap-3 pt-2">
+          <button type="button" onclick="closeGoalCalculator()" class="flex-1 py-2.5 bg-slate-700 hover:bg-slate-600 text-slate-200 font-semibold text-sm rounded-xl transition">
+            取消
+          </button>
+          <button type="button" onclick="applyCalculatedGoal()" class="flex-1 py-2.5 bg-water-600 hover:bg-water-500 text-white font-semibold text-sm rounded-xl shadow-lg transition">
+            套用為今日目標
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- MODAL: Urine Color Hydration Check (User Input 2 integration) -->
+  <div id="modal-urine-color" class="fixed inset-0 bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-4 z-50 hidden">
+    <div class="bg-slate-800 border border-slate-700 rounded-3xl max-w-lg w-full p-6 shadow-2xl space-y-5">
+      <div class="flex items-center justify-between">
+        <h3 class="text-lg font-bold text-white flex items-center gap-2">
+          <i class="fa-solid fa-vial text-amber-400"></i>
+          觀察尿液顏色 - 水分檢測指南
+        </h3>
+        <button onclick="toggleUrineModal()" class="text-slate-400 hover:text-white text-lg">
+          <i class="fa-solid fa-xmark"></i>
+        </button>
+      </div>
+
+      <p class="text-xs text-slate-300 leading-relaxed">
+        觀察排尿時的顏色是評估身體是否缺水最直覺且準確的方式。點選您目前的尿液顏色以對照水分補充建議：
+      </p>
+
+      <div class="space-y-2.5 max-h-[360px] overflow-y-auto pr-1">
+        <!-- Level 1 -->
+        <div onclick="selectUrineLevel(1, '無色或極淺', '水分補給過多', '喝水量非常充足，甚至可能稍微過多，可適度延長喝水間隔，避免水中毒。')" class="p-3 bg-slate-900/80 border border-slate-700/70 hover:border-sky-400 rounded-2xl flex items-center gap-3.5 cursor-pointer transition group">
+          <div class="w-10 h-10 rounded-xl bg-sky-100 border border-slate-300 shrink-0 flex items-center justify-center font-bold text-slate-800 text-xs shadow">1</div>
+          <div class="flex-1">
+            <div class="flex items-center justify-between">
+              <span class="text-xs font-bold text-white">無色透明 / 極淺黃</span>
+              <span class="text-[10px] bg-sky-500/20 text-sky-300 px-2 py-0.5 rounded-full border border-sky-500/30">水分過多</span>
+            </div>
+            <p class="text-[11px] text-slate-400 mt-0.5">體內水分非常充足，可適度放慢喝水頻率。</p>
+          </div>
+        </div>
+
+        <!-- Level 2 -->
+        <div onclick="selectUrineLevel(2, '淡黃色 / 琥珀原色', '理想健康狀態', '非常棒！這代表您的身體水分處於最佳平衡狀態，請繼續保持良好的喝水習慣。')" class="p-3 bg-slate-900/80 border border-slate-700/70 hover:border-emerald-400 rounded-2xl flex items-center gap-3.5 cursor-pointer transition group">
+          <div class="w-10 h-10 rounded-xl bg-yellow-200 border border-yellow-300 shrink-0 flex items-center justify-center font-bold text-slate-900 text-xs shadow">2</div>
+          <div class="flex-1">
+            <div class="flex items-center justify-between">
+              <span class="text-xs font-bold text-white">淡黃色 (檸檬黃/淺麥稈色)</span>
+              <span class="text-[10px] bg-emerald-500/20 text-emerald-300 px-2 py-0.5 rounded-full border border-emerald-500/30 font-bold">最佳理想</span>
+            </div>
+            <p class="text-[11px] text-slate-400 mt-0.5">水分平衡極佳，身體運作非常良好！</p>
+          </div>
+        </div>
+
+        <!-- Level 3 -->
+        <div onclick="selectUrineLevel(3, '深黃色', '輕微缺水警告', '身體已開始出現輕微缺水情況，建議現在補充約 250 ~ 300 ml 的開水。')" class="p-3 bg-slate-900/80 border border-slate-700/70 hover:border-amber-400 rounded-2xl flex items-center gap-3.5 cursor-pointer transition group">
+          <div class="w-10 h-10 rounded-xl bg-amber-400 border border-amber-500 shrink-0 flex items-center justify-center font-bold text-slate-900 text-xs shadow">3</div>
+          <div class="flex-1">
+            <div class="flex items-center justify-between">
+              <span class="text-xs font-bold text-white">深黃色 / 金黃色</span>
+              <span class="text-[10px] bg-amber-500/20 text-amber-300 px-2 py-0.5 rounded-full border border-amber-500/30">輕微缺水</span>
+            </div>
+            <p class="text-[11px] text-slate-400 mt-0.5">身體發出微弱缺水訊號，建議儘快喝一杯水。</p>
+          </div>
+        </div>
+
+        <!-- Level 4 -->
+        <div onclick="selectUrineLevel(4, '琥珀色 / 烏龍茶色', '明顯缺水警報', '身體呈現明顯缺水狀態！請立即補充 500 ml 開水，並避免長時間高溫活動。')" class="p-3 bg-slate-900/80 border border-slate-700/70 hover:border-orange-500 rounded-2xl flex items-center gap-3.5 cursor-pointer transition group">
+          <div class="w-10 h-10 rounded-xl bg-amber-700 border border-amber-800 shrink-0 flex items-center justify-center font-bold text-white text-xs shadow">4</div>
+          <div class="flex-1">
+            <div class="flex items-center justify-between">
+              <span class="text-xs font-bold text-white">琥珀色 / 烏龍茶色</span>
+              <span class="text-[10px] bg-orange-500/20 text-orange-300 px-2 py-0.5 rounded-full border border-orange-500/30 font-bold">嚴重缺水</span>
+            </div>
+            <p class="text-[11px] text-slate-400 mt-0.5">嚴重缺水，請立即大口補充水分並適度休息。</p>
+          </div>
+        </div>
+
+        <!-- Level 5 -->
+        <div onclick="selectUrineLevel(5, '濃茶色 / 帶紅棕色', '極度缺水或身體不適', '顏色過深且可能濃稠，若大量補水後未改善，或伴隨身體不適，建議儘速就醫檢查。')" class="p-3 bg-slate-900/80 border border-slate-700/70 hover:border-rose-500 rounded-2xl flex items-center gap-3.5 cursor-pointer transition group">
+          <div class="w-10 h-10 rounded-xl bg-amber-950 border border-rose-900 shrink-0 flex items-center justify-center font-bold text-rose-300 text-xs shadow">5</div>
+          <div class="flex-1">
+            <div class="flex items-center justify-between">
+              <span class="text-xs font-bold text-white">深褐濃茶色 / 帶紅色</span>
+              <span class="text-[10px] bg-rose-500/20 text-rose-300 px-2 py-0.5 rounded-full border border-rose-500/30 font-bold">極度警告</span>
+            </div>
+            <p class="text-[11px] text-slate-400 mt-0.5">極度缺水或可能與飲食/藥物/健康有關，請特別留意。</p>
+          </div>
+        </div>
+      </div>
+
+      <div class="pt-2">
+        <button onclick="toggleUrineModal()" class="w-full py-2.5 bg-slate-700 hover:bg-slate-600 text-white font-semibold text-sm rounded-xl transition">
+          關閉指南
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- MODAL: Reminder Settings -->
+  <div id="modal-reminder" class="fixed inset-0 bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-4 z-50 hidden">
+    <div class="bg-slate-800 border border-slate-700 rounded-3xl max-w-md w-full p-6 shadow-2xl space-y-5">
+      <div class="flex items-center justify-between">
+        <h3 class="text-lg font-bold text-white flex items-center gap-2">
+          <i class="fa-solid fa-bell text-amber-400"></i>
+          喝水提醒與聲響設定
+        </h3>
+        <button onclick="toggleReminderModal()" class="text-slate-400 hover:text-white text-lg">
+          <i class="fa-solid fa-xmark"></i>
+        </button>
+      </div>
+
+      <div class="space-y-4">
+        <div>
+          <label class="block text-xs font-medium text-slate-300 mb-1">提醒間隔時間</label>
+          <select id="reminder-interval" class="w-full bg-slate-900 border border-slate-700 rounded-xl px-3.5 py-2 text-white focus:outline-none focus:border-water-500 text-sm">
+            <option value="0">關閉提醒</option>
+            <option value="30">每 30 分鐘提醒一次</option>
+            <option value="60" selected>每 1 小時提醒一次</option>
+            <option value="90">每 1.5 小時提醒一次</option>
+            <option value="120">每 2 小時提醒一次</option>
+          </select>
+        </div>
+
+        <div class="flex items-center justify-between bg-slate-900/60 p-3 rounded-2xl border border-slate-700/60">
+          <div>
+            <p class="text-xs font-semibold text-white">記錄時播放水滴聲</p>
+            <p class="text-[11px] text-slate-400">完成喝水記錄時播放擬真音效</p>
+          </div>
+          <input type="checkbox" id="sound-toggle" checked class="w-5 h-5 accent-water-500 cursor-pointer">
+        </div>
+
+        <div class="flex items-center gap-3 pt-2">
+          <button type="button" onclick="toggleReminderModal()" class="flex-1 py-2.5 bg-slate-700 hover:bg-slate-600 text-slate-200 font-semibold text-sm rounded-xl transition">
+            關閉
+          </button>
+          <button type="button" onclick="saveReminderSettings()" class="flex-1 py-2.5 bg-water-600 hover:bg-water-500 text-white font-semibold text-sm rounded-xl shadow-lg transition">
+            儲存設定
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- MODAL: System Settings & Backup -->
+  <div id="modal-settings" class="fixed inset-0 bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-4 z-50 hidden">
+    <div class="bg-slate-800 border border-slate-700 rounded-3xl max-w-md w-full p-6 shadow-2xl space-y-5">
+      <div class="flex items-center justify-between">
+        <h3 class="text-lg font-bold text-white flex items-center gap-2">
+          <i class="fa-solid fa-gear text-slate-300"></i>
+          系統設定與資料備份
+        </h3>
+        <button onclick="toggleSettingsModal()" class="text-slate-400 hover:text-white text-lg">
+          <i class="fa-solid fa-xmark"></i>
+        </button>
+      </div>
+
+      <div class="space-y-3">
+        <p class="text-xs text-slate-400">您可以匯出飲水歷史紀錄進行備份，或重設所有本地紀錄。</p>
+        
+        <button onclick="exportDataJSON()" class="w-full py-2.5 bg-slate-700 hover:bg-slate-600 text-white text-xs font-semibold rounded-xl flex items-center justify-center gap-2 transition">
+          <i class="fa-solid fa-download"></i> 匯出歷史數據 (JSON)
+        </button>
+
+        <button onclick="resetAllData()" class="w-full py-2.5 bg-rose-500/20 hover:bg-rose-500/30 border border-rose-500/40 text-rose-300 text-xs font-semibold rounded-xl flex items-center justify-center gap-2 transition">
+          <i class="fa-solid fa-triangle-exclamation"></i> 重設所有資料 (恢復預設)
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Toast Notification -->
+  <div id="toast" class="fixed bottom-6 right-6 bg-slate-800 border border-slate-700 text-white px-4 py-3 rounded-2xl shadow-2xl flex items-center gap-3 transform translate-y-20 opacity-0 transition-all duration-300 z-50 pointer-events-none">
+    <i id="toast-icon" class="fa-solid fa-circle-check text-emerald-400 text-lg"></i>
+    <span id="toast-msg" class="text-xs font-medium">記錄成功！</span>
+  </div>
+
+
+  <script>
+    // Audio Synthesizer (Web Audio API)
+    let audioCtx = null;
+
+    function initAudioContext() {
+      if (!audioCtx) {
+        audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+      }
+      if (audioCtx.state === 'suspended') {
+        audioCtx.resume();
+      }
+    }
+
+    function playWaterDropletSound() {
+      if (reminderSettings && reminderSettings.sound === false) return;
+      try {
+        initAudioContext();
+        const osc = audioCtx.createOscillator();
+        const gain = audioCtx.createGain();
+        osc.type = 'sine';
+        osc.frequency.setValueAtTime(600, audioCtx.currentTime);
+        osc.frequency.exponentialRampToValueAtTime(1200, audioCtx.currentTime + 0.12);
+        gain.gain.setValueAtTime(0.3, audioCtx.currentTime);
+        gain.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + 0.12);
+        osc.connect(gain);
+        gain.connect(audioCtx.destination);
+        osc.start();
+        osc.stop(audioCtx.currentTime + 0.12);
+      } catch (e) {
+        console.warn("Audio play error:", e);
+      }
+    }
+
+    function playPuppyBarkSound() {
+      try {
+        initAudioContext();
+        const osc = audioCtx.createOscillator();
+        const gain = audioCtx.createGain();
+        osc.type = 'triangle';
+        osc.frequency.setValueAtTime(450, audioCtx.currentTime);
+        osc.frequency.exponentialRampToValueAtTime(220, audioCtx.currentTime + 0.15);
+        gain.gain.setValueAtTime(0.35, audioCtx.currentTime);
+        gain.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + 0.15);
+        osc.connect(gain);
+        gain.connect(audioCtx.destination);
+        osc.start();
+        osc.stop(audioCtx.currentTime + 0.15);
+      } catch (e) {
+        console.warn("Puppy sound play error:", e);
+      }
+    }
+
+    function updatePomeranianState(pct) {
+      const speechEl = document.getElementById('pom-speech-text');
+      const partyHat = document.getElementById('pom-party-hat');
+      const tongue = document.getElementById('pom-tongue');
+      if (!speechEl) return;
+
+      if (pct >= 100) {
+        speechEl.textContent = '太讚了！今日喝水量順利達標汪！🎉🐾';
+        if (partyHat) partyHat.classList.remove('hidden');
+        if (tongue) tongue.setAttribute('d', 'M 95,96 Q 100,112 105,96 Z');
+      } else if (pct >= 75) {
+        speechEl.textContent = '再喝一點點就達標了，博美為你加油！✨';
+        if (partyHat) partyHat.classList.add('hidden');
+        if (tongue) tongue.setAttribute('d', 'M 96,97 Q 100,108 104,97 Z');
+      } else if (pct >= 40) {
+        speechEl.textContent = '太棒了！保持良好的喝水節奏喔汪～💧';
+        if (partyHat) partyHat.classList.add('hidden');
+        if (tongue) tongue.setAttribute('d', 'M 97,97 Q 100,106 103,97 Z');
+      } else if (pct > 0) {
+        speechEl.textContent = '主人開始喝水了，繼續加油汪！🐾';
+        if (partyHat) partyHat.classList.add('hidden');
+        if (tongue) tongue.setAttribute('d', 'M 97,97 Q 100,105 103,97 Z');
+      } else {
+        speechEl.textContent = '主人快補充水分汪！寶貝博美陪你一起喝～ 🐾';
+        if (partyHat) partyHat.classList.add('hidden');
+        if (tongue) tongue.setAttribute('d', 'M 97,97 Q 100,108 103,97 Z');
+      }
+    }
+
+    function interactWithPomeranian(event) {
+      playPuppyBarkSound();
+      
+      const container = document.getElementById('pom-hearts-container');
+      if (container) {
+        const heart = document.createElement('div');
+        heart.className = 'heart-effect fa-solid fa-heart';
+        const rect = container.getBoundingClientRect();
+        const x = (event && event.clientX) ? (event.clientX - rect.left) : (rect.width / 2);
+        const y = (event && event.clientY) ? (event.clientY - rect.top) : (rect.height / 2);
+        heart.style.left = `${Math.max(10, Math.min(rect.width - 20, x - 10))}px`;
+        heart.style.top = `${Math.max(10, Math.min(rect.height - 20, y - 10))}px`;
+        container.appendChild(heart);
+        setTimeout(() => heart.remove(), 1000);
+      }
+
+      const speechEl = document.getElementById('pom-speech-text');
+      if (speechEl) {
+        const messages = [
+          '汪！主人最棒了！摸摸好舒服～ 🐾',
+          '多喝開水身體好，博美最愛你了！❤️',
+          '汪汪！記得定時喝水補充能量喔！💧',
+          '汪！汪！今天也要補足水分喔！🌟'
+        ];
+        speechEl.textContent = messages[Math.floor(Math.random() * messages.length)];
+      }
+    }
+
+    let appLogs = {};
+    let dailyGoal = 2000;
+    let reminderSettings = { intervalMinutes: 60, sound: true };
+    let reminderIntervalId = null;
+    let chartInstance = null;
+    let selectedBeverageType = { name: '開水', icon: 'fa-droplet', color: 'text-water-400' };
+
+    function getTodayString() {
+      const d = new Date();
+      return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+    }
+
+    function loadAppData() {
+      // Data is synced in real-time via Firestore listeners
+      if (typeof window.updateDashboardUI === 'function') {
+        window.updateDashboardUI();
+      }
+    }
+
+    function saveGoal(goal) {
+      dailyGoal = goal;
+      if (window.auth?.currentUser && window.firebaseUtils) {
+        const uid = window.auth.currentUser.uid;
+        const docRef = window.firebaseUtils.doc(window.db, 'artifacts', window.appId, 'users', uid, 'settings', 'user_settings');
+        window.firebaseUtils.setDoc(docRef, { dailyGoal: goal }, { merge: true }).catch(err => console.warn(err));
+      }
+    }
+
+    function updateDashboardUI() {
+      const todayStr = getTodayString();
+      const todayLogs = appLogs[todayStr] || [];
+
+      const todayTotal = todayLogs.reduce((acc, item) => acc + item.amount, 0);
+
+      const dateObj = new Date();
+      const options = { year: 'numeric', month: 'long', day: 'numeric', weekday: 'long' };
+      document.getElementById('current-date-str').textContent = dateObj.toLocaleDateString('zh-TW', options);
+
+      document.getElementById('current-intake-num').textContent = todayTotal;
+      document.getElementById('daily-goal-num').textContent = dailyGoal;
+
+      const pct = Math.min(Math.round((todayTotal / dailyGoal) * 100), 100);
+      document.getElementById('percentage-num').textContent = `${pct}%`;
+
+      const remaining = Math.max(0, dailyGoal - todayTotal);
+      document.getElementById('remaining-text').textContent = remaining > 0 ? `還差 ${remaining} ml` : '今日目標已達標！';
+
+      const liquidContainer = document.getElementById('jar-liquid-container');
+      liquidContainer.style.height = `${Math.max(4, pct)}%`;
+
+      updatePomeranianState(pct);
+
+      if (pct >= 100 && !todayLogs.goalReachedFired) {
+        triggerGoalConfetti();
+        playPuppyBarkSound();
+        todayLogs.goalReachedFired = true;
+      }
+
+      renderTodayLogs(todayLogs);
+      updateStreakCount();
+      renderAnalyticsChart(activeChartTab);
+    }
+
+    function renderTodayLogs(logs) {
+      const container = document.getElementById('today-logs-list');
+      const countBadge = document.getElementById('log-count-badge');
+      countBadge.textContent = `共 ${logs.length} 筆`;
+
+      if (logs.length === 0) {
+        container.innerHTML = `
+          <div class="h-40 flex flex-col items-center justify-center text-slate-500 space-y-2">
+            <i class="fa-solid fa-faucet-drip text-3xl text-slate-600"></i>
+            <p class="text-sm">今日尚無飲水紀錄，快來喝第一杯水吧！</p>
+          </div>
+        `;
+        return;
+      }
+
+      const sorted = [...logs].reverse();
+
+      container.innerHTML = sorted.map((log) => `
+        <div class="bg-slate-900/60 border border-slate-700/50 p-3 rounded-2xl flex items-center justify-between hover:border-slate-600 transition group">
+          <div class="flex items-center gap-3">
+            <div class="w-9 h-9 rounded-xl bg-slate-800 border border-slate-700 flex items-center justify-center text-base">
+              <i class="fa-solid ${log.icon || 'fa-droplet'} ${log.iconColor || 'text-water-400'}"></i>
+            </div>
+            <div>
+              <div class="flex items-center gap-2">
+                <span class="text-sm font-bold text-white">${log.amount} ml</span>
+                <span class="text-[11px] bg-slate-800 px-2 py-0.5 rounded-full text-slate-300 border border-slate-700">${log.bev || '開水'}</span>
+              </div>
+              <p class="text-[10px] text-slate-400">${log.time}</p>
+            </div>
+          </div>
+          <button onclick="deleteLogItem('${log.id}', '${log.firestoreId || ''}')" class="text-slate-500 hover:text-rose-400 p-2 opacity-60 group-hover:opacity-100 transition" title="刪除本筆記錄">
+            <i class="fa-solid fa-trash-can text-xs"></i>
+          </button>
+        </div>
+      `).join('');
+    }
+
+    function addWaterLog(amount, beverage = '開水', icon = 'fa-droplet', iconColor = 'text-water-400', customTime = null) {
+      const todayStr = getTodayString();
+
+      const now = new Date();
+      const timeStr = customTime || `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
+
+      const newEntry = {
+        id: Date.now().toString(36) + Math.random().toString(36).substr(2, 5),
+        dateStr: todayStr,
+        amount: parseInt(amount, 10),
+        bev: beverage,
+        icon: icon,
+        iconColor: iconColor,
+        time: timeStr,
+        createdAt: Date.now()
+      };
+
+      if (!appLogs[todayStr]) {
+        appLogs[todayStr] = [];
+      }
+      appLogs[todayStr].push(newEntry);
+
+      if (window.auth?.currentUser && window.firebaseUtils) {
+        const uid = window.auth.currentUser.uid;
+        const logsCollection = window.firebaseUtils.collection(window.db, 'artifacts', window.appId, 'users', uid, 'logs');
+        window.firebaseUtils.addDoc(logsCollection, newEntry).catch(err => console.warn(err));
+      }
+
+      playWaterDropletSound();
+      updateDashboardUI();
+      showToast(`已成功紀錄 ${amount} ml (${beverage})`);
+    }
+
+    function quickAddWater(amount, name) {
+      addWaterLog(amount, name, 'fa-droplet', 'text-water-400');
+    }
+
+    function deleteLogItem(id, firestoreId) {
+      const todayStr = getTodayString();
+      if (appLogs[todayStr]) {
+        appLogs[todayStr] = appLogs[todayStr].filter(item => item.id !== id);
+      }
+
+      if (firestoreId && window.auth?.currentUser && window.firebaseUtils) {
+        const uid = window.auth.currentUser.uid;
+        const docRef = window.firebaseUtils.doc(window.db, 'artifacts', window.appId, 'users', uid, 'logs', firestoreId);
+        window.firebaseUtils.deleteDoc(docRef).catch(err => console.warn(err));
+      }
+
+      updateDashboardUI();
+      showToast('已刪除該筆飲水紀錄');
+    }
+
+    function clearTodayLogs() {
+      const todayStr = getTodayString();
+      if (appLogs[todayStr] && appLogs[todayStr].length > 0) {
+        const toDelete = appLogs[todayStr];
+        appLogs[todayStr] = [];
+
+        if (window.auth?.currentUser && window.firebaseUtils) {
+          const uid = window.auth.currentUser.uid;
+          toDelete.forEach(item => {
+            if (item.firestoreId) {
+              const docRef = window.firebaseUtils.doc(window.db, 'artifacts', window.appId, 'users', uid, 'logs', item.firestoreId);
+              window.firebaseUtils.deleteDoc(docRef).catch(err => console.warn(err));
+            }
+          });
+        }
+
+        updateDashboardUI();
+        showToast('已清空今日紀錄');
+      }
+    }
+
+    function updateStreakCount() {
+      let streak = 0;
+      let curr = new Date();
+
+      while (true) {
+        const dateStr = `${curr.getFullYear()}-${String(curr.getMonth() + 1).padStart(2, '0')}-${String(curr.getDate()).padStart(2, '0')}`;
+        const dayLogs = appLogs[dateStr] || [];
+        const totalIntake = dayLogs.reduce((a, b) => a + b.amount, 0);
+
+        if (totalIntake >= dailyGoal) {
+          streak++;
+          curr.setDate(curr.getDate() - 1);
+        } else {
+          if (dateStr === getTodayString()) {
+            curr.setDate(curr.getDate() - 1);
+            continue;
+          }
+          break;
+        }
+      }
+
+      document.getElementById('streak-count').textContent = streak;
+    }
+
+    let activeChartTab = 'week';
+
+    function switchChartTab(tab) {
+      activeChartTab = tab;
+      const btnWeek = document.getElementById('tab-btn-week');
+      const btnMonth = document.getElementById('tab-btn-month');
+
+      if (tab === 'week') {
+        btnWeek.className = 'px-3 py-1.5 rounded-lg font-medium text-white bg-water-600 transition';
+        btnMonth.className = 'px-3 py-1.5 rounded-lg font-medium text-slate-400 hover:text-white transition';
+      } else {
+        btnMonth.className = 'px-3 py-1.5 rounded-lg font-medium text-white bg-water-600 transition';
+        btnWeek.className = 'px-3 py-1.5 rounded-lg font-medium text-slate-400 hover:text-white transition';
+      }
+
+      renderAnalyticsChart(tab);
+    }
+
+    function renderAnalyticsChart(mode = 'week') {
+      const ctx = document.getElementById('hydrationChart').getContext('2d');
+      const labels = [];
+      const dataValues = [];
+
+      const daysCount = mode === 'week' ? 7 : 30;
+      let maxDayIntake = 0;
+      let totalAllIntake = 0;
+      let daysMetGoal = 0;
+
+      for (let i = daysCount - 1; i >= 0; i--) {
+        const d = new Date();
+        d.setDate(d.getDate() - i);
+        const dateStr = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+        const dayLogs = appLogs[dateStr] || [];
+        const sum = dayLogs.reduce((acc, curr) => acc + curr.amount, 0);
+
+        if (mode === 'week') {
+          const weekdayNames = ['週日', '週一', '週二', '週三', '週四', '週五', '週六'];
+          labels.push(`${weekdayNames[d.getDay()]} (${d.getMonth() + 1}/${d.getDate()})`);
+        } else {
+          labels.push(`${d.getMonth() + 1}/${d.getDate()}`);
+        }
+
+        dataValues.push(sum);
+
+        if (sum > maxDayIntake) maxDayIntake = sum;
+        if (sum >= dailyGoal) daysMetGoal++;
+        totalAllIntake += sum;
+      }
+
+      const weekAvg = Math.round(totalAllIntake / daysCount);
+      document.getElementById('stat-weekly-avg').textContent = `${weekAvg} ml`;
+      document.getElementById('stat-max-day').textContent = `${maxDayIntake} ml`;
+      document.getElementById('stat-total-intake').textContent = `${(totalAllIntake / 1000).toFixed(1)} L`;
+      document.getElementById('stat-monthly-rate').textContent = `${Math.round((daysMetGoal / daysCount) * 100)}%`;
+
+      if (chartInstance) {
+        chartInstance.destroy();
+      }
+
+      chartInstance = new Chart(ctx, {
+        type: 'bar',
+        data: {
+          labels: labels,
+          datasets: [{
+            label: '每日喝水量 (ml)',
+            data: dataValues,
+            backgroundColor: dataValues.map(val => val >= dailyGoal ? 'rgba(14, 165, 233, 0.8)' : 'rgba(56, 189, 248, 0.4)'),
+            borderColor: dataValues.map(val => val >= dailyGoal ? '#0284c7' : '#38bdf8'),
+            borderWidth: 1.5,
+            borderRadius: 6,
+          }]
+        },
+        options: {
+          responsive: true,
+          maintainAspectRatio: false,
+          plugins: {
+            legend: { display: false },
+            tooltip: {
+              backgroundColor: '#0f172a',
+              titleColor: '#e2e8f0',
+              bodyColor: '#38bdf8',
+              borderColor: '#334155',
+              borderWidth: 1,
+              padding: 10,
+              callbacks: {
+                label: function(context) {
+                  return ` 喝水量: ${context.raw} ml`;
+                }
+              }
+            }
+          },
+          scales: {
+            x: {
+              grid: { display: false },
+              ticks: { color: '#94a3b8', font: { size: 10 } }
+            },
+            y: {
+              grid: { color: 'rgba(51, 65, 85, 0.5)' },
+              ticks: { color: '#94a3b8', font: { size: 10 } },
+              beginAtZero: true
+            }
+          }
+        }
+      });
+    }
+
+    function selectBeverage(name, icon, color) {
+      selectedBeverageType = { name, icon, color };
+      document.querySelectorAll('.bev-opt').forEach(btn => {
+        btn.classList.remove('border-water-500', 'bg-water-500/10', 'text-white');
+        btn.classList.add('border-slate-700', 'bg-slate-900/60', 'text-slate-300');
+      });
+
+      event.currentTarget.classList.remove('border-slate-700', 'bg-slate-900/60', 'text-slate-300');
+      event.currentTarget.classList.add('border-water-500', 'bg-water-500/10', 'text-white');
+    }
+
+    function toggleCustomAddModal() {
+      const modal = document.getElementById('modal-custom-add');
+      modal.classList.toggle('hidden');
+      if (!modal.classList.contains('hidden')) {
+        const now = new Date();
+        document.getElementById('input-time').value = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
+      }
+    }
+
+    function handleCustomAddSubmit(e) {
+      e.preventDefault();
+      const amount = document.getElementById('input-amount').value;
+      const time = document.getElementById('input-time').value;
+
+      addWaterLog(amount, selectedBeverageType.name, selectedBeverageType.icon, selectedBeverageType.color, time);
+      toggleCustomAddModal();
+    }
+
+    // Urine Color Modal Trigger
+    function toggleUrineModal() {
+      document.getElementById('modal-urine-color').classList.toggle('hidden');
+    }
+
+    function selectUrineLevel(lvl, colorTitle, statusTitle, adviceText) {
+      showToast(`檢測狀態：【${statusTitle}】 - ${adviceText}`);
+      toggleUrineModal();
+    }
+
+    function openGoalCalculator() {
+      document.getElementById('modal-goal-calc').classList.remove('hidden');
+      calculateGoalValue();
+    }
+
+    function closeGoalCalculator() {
+      document.getElementById('modal-goal-calc').classList.add('hidden');
+    }
+
+    function calculateGoalValue() {
+      const weight = parseFloat(document.getElementById('calc-weight').value) || 60;
+      const multiplier = parseFloat(document.getElementById('calc-activity').value) || 35;
+      const recommended = Math.round(weight * multiplier);
+      document.getElementById('calc-result').textContent = `${recommended} ml`;
+      return recommended;
+    }
+
+    document.getElementById('calc-weight')?.addEventListener('input', calculateGoalValue);
+    document.getElementById('calc-activity')?.addEventListener('change', calculateGoalValue);
+
+    function applyCalculatedGoal() {
+      const recommended = calculateGoalValue();
+      saveGoal(recommended);
+      updateDashboardUI();
+      closeGoalCalculator();
+      showToast(`每日目標已更新為 ${recommended} ml`);
+    }
+
+    function toggleReminderModal() {
+      document.getElementById('modal-reminder').classList.toggle('hidden');
+    }
+
+    function saveReminderSettings() {
+      const interval = parseInt(document.getElementById('reminder-interval').value, 10);
+      const sound = document.getElementById('sound-toggle').checked;
+
+      reminderSettings = { intervalMinutes: interval, sound: sound };
+
+      if (window.auth?.currentUser && window.firebaseUtils) {
+        const uid = window.auth.currentUser.uid;
+        const docRef = window.firebaseUtils.doc(window.db, 'artifacts', window.appId, 'users', uid, 'settings', 'user_settings');
+        window.firebaseUtils.setDoc(docRef, { reminderSettings }, { merge: true }).catch(err => console.warn(err));
+      }
+
+      setupReminderTimer();
+      toggleReminderModal();
+      showToast('提醒設定已更新');
+    }
+
+    function setupReminderTimer() {
+      if (reminderIntervalId) clearInterval(reminderIntervalId);
+
+      const indicator = document.getElementById('reminder-indicator');
+      const timeText = document.getElementById('next-reminder-time');
+
+      if (reminderSettings.intervalMinutes <= 0) {
+        indicator.classList.add('hidden');
+        timeText.textContent = '未啟用計時提醒';
+        return;
+      }
+
+      indicator.classList.remove('hidden');
+      const intervalMs = reminderSettings.intervalMinutes * 60 * 1000;
+      
+      const nextTime = new Date(Date.now() + intervalMs);
+      timeText.textContent = `定時提醒：每 ${reminderSettings.intervalMinutes} 分鐘一次 (${String(nextTime.getHours()).padStart(2, '0')}:${String(nextTime.getMinutes()).padStart(2, '0')})`;
+
+      reminderIntervalId = setInterval(() => {
+        playWaterDropletSound();
+        showToast('🔔 該喝口開水囉！保持身體補充水分！');
+      }, intervalMs);
+    }
+
+    function toggleSettingsModal() {
+      document.getElementById('modal-settings').classList.toggle('hidden');
+    }
+
+    function exportDataJSON() {
+      const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify({ logs: appLogs, goal: dailyGoal }, null, 2));
+      const downloadAnchor = document.createElement('a');
+      downloadAnchor.setAttribute("href", dataStr);
+      downloadAnchor.setAttribute("download", `hydration_backup_${getTodayString()}.json`);
+      document.body.appendChild(downloadAnchor);
+      downloadAnchor.click();
+      downloadAnchor.remove();
+      showToast('數據已匯出');
+    }
+
+    function resetAllData() {
+      appLogs = {};
+      dailyGoal = 2000;
+      if (window.auth?.currentUser && window.firebaseUtils) {
+        const uid = window.auth.currentUser.uid;
+        const settingsRef = window.firebaseUtils.doc(window.db, 'artifacts', window.appId, 'users', uid, 'settings', 'user_settings');
+        window.firebaseUtils.setDoc(settingsRef, { dailyGoal: 2000, reminderSettings: { intervalMinutes: 60, sound: true } });
+      }
+      updateDashboardUI();
+      toggleSettingsModal();
+      showToast('所有紀錄已重設為預設狀態');
+    }
+
+    function triggerGoalConfetti() {
+      if (typeof confetti === 'function') {
+        confetti({
+          particleCount: 80,
+          spread: 70,
+          origin: { y: 0.6 },
+          colors: ['#0ea5e9', '#38bdf8', '#38f8d4', '#ffffff']
+        });
+      }
+    }
+
+    function showToast(message) {
+      const toast = document.getElementById('toast');
+      const msg = document.getElementById('toast-msg');
+      msg.textContent = message;
+      toast.classList.remove('translate-y-20', 'opacity-0');
+
+      setTimeout(() => {
+        toast.classList.add('translate-y-20', 'opacity-0');
+      }, 3500);
+    }
+
+    window.onload = function() {
+      loadAppData();
+      setupReminderTimer();
+      updateDashboardUI();
+    };
+  </script>
+</body>
+</html>
