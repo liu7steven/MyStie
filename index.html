@@ -1,0 +1,303 @@
+<!DOCTYPE html>
+<html lang="zh-TW" data-theme="dark">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>About Me | 嵌入式韌體與測試技術主管</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600;700&display=swap" rel="stylesheet">
+  
+  <style>
+    /* 顏色變數定義 */
+    :root[data-theme="dark"] {
+      --bg-color: #0f172a;
+      --card-bg: #1e293b;
+      --text-color: #f8fafc;
+      --text-muted: #94a3b8;
+      --accent-color: #38bdf8;
+      --accent-hover: #0284c7;
+      --border-color: #334155;
+      --chip-bg: #334155;
+      --shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.5);
+    }
+
+    :root[data-theme="light"] {
+      --bg-color: #f8fafc;
+      --card-bg: #ffffff;
+      --text-color: #0f172a;
+      --text-muted: #64748b;
+      --accent-color: #0284c7;
+      --accent-hover: #0369a1;
+      --border-color: #e2e8f0;
+      --chip-bg: #f1f5f9;
+      --shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.08);
+    }
+
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+      transition: background-color 0.3s, color 0.3s, border-color 0.3s;
+    }
+
+    body {
+      font-family: 'Inter', system-ui, -apple-system, sans-serif;
+      background-color: var(--bg-color);
+      color: var(--text-color);
+      line-height: 1.6;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      min-height: 100vh;
+      padding: 2rem 1rem;
+    }
+
+    /* 固定懸浮控制按鈕區 */
+    .controls {
+      position: fixed;
+      top: 1.5rem;
+      right: 1.5rem;
+      display: flex;
+      gap: 0.75rem;
+      z-index: 1000;
+    }
+
+    .btn-control {
+      background: var(--card-bg);
+      color: var(--text-color);
+      border: 1px solid var(--border-color);
+      padding: 0.6rem 1rem;
+      border-radius: 50px;
+      cursor: pointer;
+      font-size: 0.9rem;
+      font-weight: 600;
+      box-shadow: var(--shadow);
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+    }
+
+    .btn-control:hover {
+      border-color: var(--accent-color);
+    }
+
+    /* 主要容器 */
+    .container {
+      max-width: 800px;
+      width: 100%;
+      background: var(--card-bg);
+      border: 1px solid var(--border-color);
+      border-radius: 20px;
+      padding: 3rem 2.5rem;
+      box-shadow: var(--shadow);
+    }
+
+    /* 個人頭像與標題 */
+    .profile-header {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      text-align: center;
+      margin-bottom: 2.5rem;
+    }
+
+    .avatar-wrapper {
+      position: relative;
+      width: 140px;
+      height: 140px;
+      margin-bottom: 1.5rem;
+    }
+
+    .avatar {
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+      border-radius: 50%;
+      border: 3px solid var(--accent-color);
+    }
+
+    .profile-header h1 {
+      font-size: 2rem;
+      font-weight: 700;
+      margin-bottom: 0.5rem;
+    }
+
+    .profile-header .subtitle {
+      color: var(--accent-color);
+      font-weight: 600;
+      font-size: 1.1rem;
+    }
+
+    /* 區塊樣式 */
+    section {
+      margin-bottom: 2rem;
+    }
+
+    section:last-child {
+      margin-bottom: 0;
+    }
+
+    h2 {
+      font-size: 1.25rem;
+      margin-bottom: 1rem;
+      border-bottom: 2px solid var(--border-color);
+      padding-bottom: 0.5rem;
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+    }
+
+    p {
+      color: var(--text-muted);
+      margin-bottom: 1rem;
+    }
+
+    /* 技能標籤 */
+    .skills-grid {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.6rem;
+    }
+
+    .chip {
+      background: var(--chip-bg);
+      color: var(--text-color);
+      padding: 0.4rem 0.9rem;
+      border-radius: 8px;
+      font-size: 0.875rem;
+      border: 1px solid var(--border-color);
+    }
+
+    /* 成就高亮 */
+    .highlight-card {
+      background: rgba(56, 189, 248, 0.08);
+      border-left: 4px solid var(--accent-color);
+      padding: 1rem 1.25rem;
+      border-radius: 0 10px 10px 0;
+      margin-bottom: 1rem;
+    }
+
+    .highlight-card p {
+      color: var(--text-color);
+      margin: 0;
+      font-weight: 600;
+    }
+
+    @media (max-width: 600px) {
+      .container {
+        padding: 2rem 1.5rem;
+      }
+      .profile-header h1 {
+        font-size: 1.6rem;
+      }
+      .controls {
+        top: 1rem;
+        right: 1rem;
+      }
+    }
+  </style>
+</head>
+<body>
+
+  <!-- 控制按鈕（背景音樂與主題切換） -->
+  <div class="controls">
+    <button class="btn-control" id="musicBtn" onclick="toggleMusic()">
+      🎵 播放音樂
+    </button>
+    <button class="btn-control" id="themeBtn" onclick="toggleTheme()">
+      🌙 深色模式
+    </button>
+  </div>
+
+  <!-- 音樂元件 -->
+  <audio id="bgMusic" loop>
+    <source src="https://img.ai365.fans/artworks/a8cab812-92b9-4628-8a5b-e970b7482e77/9wb1fn6wrka.mp3" type="audio/mpeg">
+    您的瀏覽器不支援音訊播放。
+  </audio>
+
+  <!-- 主頁面容器 -->
+  <main class="container">
+    
+    <!-- 頭像與基本資訊 -->
+    <header class="profile-header">
+      <div class="avatar-wrapper">
+        <img 
+          src="https://i.pinimg.com/474x/55/5d/c7/555dc72e2006e8d12549bea4e998c04b.jpg" 
+          alt="個人大頭照" 
+          class="avatar"
+        />
+      </div>
+      <h1>資深韌體與測試專家</h1>
+      <div class="subtitle">連結硬體品質與系統穩定性的關鍵角色</div>
+    </header>
+
+    <!-- 職責貢獻 -->
+    <section>
+      <h2>🎯 職責與關鍵貢獻</h2>
+      <div class="highlight-card">
+        <p>🏆 主導產品測試流程，維持長達 8 年零錯誤（Zero-Defect）紀錄</p>
+      </div>
+      <p>
+        深耕電子與半導體封裝產業，展現高度嚴謹的品質把關能力與問題預防思維。同時負責 <strong>ARM Cortex-M0</strong> 韌體開發，運用 Keil 開發環境完成產品核心韌體，並將豐富的測試經驗反饋至韌體架構設計，形成軟硬整合的完整開發閉環。
+      </p>
+    </section>
+
+    <!-- 專業技能 -->
+    <section>
+      <h2>💻 專業技能與核心能力</h2>
+      <div class="skills-grid">
+        <span class="chip">ARM Cortex-M0</span>
+        <span class="chip">Keil IDE</span>
+        <span class="chip">C 語言</span>
+        <span class="chip">Smart Card</span>
+        <span class="chip">SIM 卡相關技術</span>
+        <span class="chip">產品測試流程</span>
+        <span class="chip">品質管控 (QA)</span>
+        <span class="chip">韌體除錯與優化</span>
+        <span class="chip">軟硬體整合</span>
+      </div>
+    </section>
+
+    <!-- 未來發展 -->
+    <section>
+      <h2>🚀 發展方向與願景</h2>
+      <p>
+        憑藉扎實的測試與韌體整合背景，目前正積極尋求<strong>技術主管（Technical Lead / Manager）</strong>職位的發展機會。期望將既有的半導體專業延伸至更廣泛的半導體應用領域，並關注 <strong>AI 與 IT 領域的跨界結合</strong>，推動次世代軟硬體整合技術落地。
+      </p>
+    </section>
+
+  </main>
+
+  <script>
+    // 主題切換邏輯
+    function toggleTheme() {
+      const html = document.documentElement;
+      const themeBtn = document.getElementById('themeBtn');
+      const currentTheme = html.getAttribute('data-theme');
+      
+      if (currentTheme === 'dark') {
+        html.setAttribute('data-theme', 'light');
+        themeBtn.innerHTML = '☀️ 淺色模式';
+      } else {
+        html.setAttribute('data-theme', 'dark');
+        themeBtn.innerHTML = '🌙 深色模式';
+      }
+    }
+
+    // 背景音樂開關邏輯
+    const music = document.getElementById('bgMusic');
+    const musicBtn = document.getElementById('musicBtn');
+
+    function toggleMusic() {
+      if (music.paused) {
+        music.play();
+        musicBtn.innerHTML = '⏸️ 暫停音樂';
+      } else {
+        music.pause();
+        musicBtn.innerHTML = '🎵 播放音樂';
+      }
+    }
+  </script>
+</body>
+</html>
